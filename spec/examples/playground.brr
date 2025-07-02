@@ -1,0 +1,108 @@
+// This is single-line comment
+/*
+    This is multiline comment
+*/
+
+import "hello.brr"; // example: add()
+import "hello.brr" as hello; // example: hello.add()
+
+// Naming conventions:
+// - variables -> camelCase
+// - functions and methods -> camelCase
+// - types and structs -> PascalCase
+
+// Structures and methods
+struct Person {
+    name, surname, age, // Optional trailing semicolon
+
+    fn greet() {
+        this.hello();
+        ...
+    }
+}; // Optional semicolon
+
+// Conditionals
+if (a < b) {
+    ...   
+} else if (a > b) {
+    ...
+} else {
+    ...
+}
+
+if (a < b) { return true; }
+return if (8 == 3) 'a' else 'c';
+
+// Loops
+loop { ... } // Infinite loop syntax sugar
+while (a < b) { ... }
+do { ... } while (a < b)
+
+for (a in b) { ... }
+for (i in 0..1) { ... }
+
+struct MyIterator {
+    fn next() { 
+        return 1; // first invocation
+        return null; // last invocation
+    }
+}
+for (a in iter) { ... } // -> while (x = iter.next()) { ... }
+
+// Variables and constants
+brr someExample = 10; // brr - Briefly Register Resource
+const SOME_EXAMPLE = 20;
+
+// Attributes
+@someAttribute
+brr something = "";
+
+// Native bindings (ważne!!!)
+native "lib.so/add" fn myAdd();
+native "lib.so" fn add();
+
+// Error model
+return 1; // Zwraca 1 jako wartość
+return error 1; // Zwraca 1 jako error
+
+fn functionA() {
+    return error 1;
+}
+
+fn functionB() {
+    brr a = functionA();
+    brr b = if (iserror a) "value is an error" else "value is not an error";
+    functionA()?; // Syntax sugar for trying
+    functionA() catch (err) { ... }; // Catch and do something with an error
+    functionA()!; // Assume that error cannot occur and panic if it does
+}
+
+// Template literals
+brr myTemplate = $"hello {world}"; // escaped "{{" is escaped "{"
+
+// Literały (struktur, intów 0x.., 0b.., 10e5, ...)
+struct Person { name, age };
+brr value = Person { name: "Patapim", age: 4079, };
+
+// Tablice
+brr myIntArray = [1, 2, 3, 4];
+brr zeroedArray = [0; 10]; // [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+brr rangeArray = [... 1..10]; // [1, 2, 3, ...], [RangeIterator(1, 10)]    
+brr example = [1, 2, ...rangeArray]; // inclusive ranges with 1..=10
+
+// Krotki
+brr tuple = (1, "hello", world);
+brr (x, y, z) = tuple;
+
+// Anonimowe struktury
+brr anonStruct = #{
+    name: "Brr Brr", surname: "Patapim"
+};
+
+// Operatory
+==, !=, <, >, <=, >=,
+!, |, &, ^, and/&&, or/||, |=, &=, ^=, <<, >>,
++, -, *, /, %, +=, -=, *=, /=, %=, ++, --
+
+// Lambda/Closures 
+(a, b)  -> { ... }
