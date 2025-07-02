@@ -3,6 +3,10 @@
 
 const std = @import("std");
 
+pub const Lexer = @import("Lexer.zig");
+
+// Above are temporary public imports. Used for testing until there is proper library API.
+
 test {
     // This ensures that all submodules are referenced when compiling tests
     // to prevent tree shaking from removing tests.
