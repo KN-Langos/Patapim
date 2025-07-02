@@ -1,5 +1,9 @@
 # Patapim
 
+<div style="float: right">
+    <img src="./patapim_logo.png" alt="Patapim is always looking at you" style="height: 300px"/>
+</div>
+
 **Patapim** to eksperymentalny, interpretowany język programowania rozwijany w ramach działalności koła naukowego **Langos**.  
 Jego głównym celem jest umożliwienie członkom koła łatwego poznania zasad projektowania i implementacji języków programowania.
 
