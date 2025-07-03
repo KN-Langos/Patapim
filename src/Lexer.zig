@@ -17,7 +17,7 @@ source: []const u8,
 const Self = @This();
 const LOG = std.log.scoped(.lexer);
 
-pub const Error = error{InvalidToken};
+pub const Error = error{ InvalidToken, UnterminatedMultilineComment };
 
 pub const LiteralValue = union(enum) {
     none: void,
@@ -33,6 +33,12 @@ pub const Token = struct {
     literal: LiteralValue = .none,
 };
 
+pub const KEYWORD_MAP: std.StaticStringMap(TokenType) = .initComptime(.{
+    .{ "import", .KW_IMPORT },
+    .{ "as", .KW_AS },
+    // TODO: [...]
+});
+
 pub const TokenType = enum {
     // Parentheses:
     LEFT_PAREN, // '('
@@ -42,7 +48,13 @@ pub const TokenType = enum {
     LEFT_SQUARE, // '['
     RIGHT_SQUARE, // ']'
 
+    // Keywords:
+    KW_IMPORT,
+    KW_AS,
+    // TODO: [...]
+
     // Special tokens:
+    IDENTIFIER,
     EOF, // End of file.
 };
 
@@ -62,36 +74,22 @@ pub fn next(self: *Self) Self.Error!Token {
     };
 
     if (self.isAtEnd()) return eof;
-
-    var char = self.source[self.current];
-
-    // Skip whitespace characters.
-    while (std.ascii.isWhitespace(char)) : (char = self.source[self.current])
-        self.current += 1;
-    self.start = self.current;
-
-    // Fetch next token if exists.
-    const next_char: ?u8 = if (self.current + 1 < self.source.len) self.source[self.current] else null;
-
-    // Skip comments
-    if (char == '/' and next_char == '/') {
-        // Skip until newline character.
-        while (char != '\n') : (char = self.source[self.current])
-            self.current += 1;
-        self.start = self.current;
-    }
+    try self.skipWhitespaceAndComments(); // TODO: Catch and pretty print error.
+    self.start = self.current; // Update start index after comments and ws.
     if (self.isAtEnd()) return eof;
 
     // Match token with predefined list.
+    const char = self.source[self.current];
     const literal_value: LiteralValue = .none;
     const token_type: TokenType = switch (char) {
         '(' => .LEFT_PAREN,
         ')' => .RIGHT_PAREN,
         '{' => .LEFT_CURLY,
-        '}' => .LEFT_CURLY,
+        '}' => .RIGHT_CURLY,
         '[' => .LEFT_SQUARE,
         ']' => .RIGHT_SQUARE,
 
+        'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
         else => return error.InvalidToken,
     };
 
@@ -112,4 +110,143 @@ pub fn next(self: *Self) Self.Error!Token {
         result_token.literal,
     });
     return result_token;
+}
+
+// Lex any identifier or keyword.
+// This function parses an identifier and then attempts to match
+// it against known keyword map.
+fn lexIdentifierOrKW(self: *Self) TokenType {
+    // Parse until end of identifier.
+    var char = self.source[self.current];
+    while (!self.isAtEnd() and std.ascii.isAlphanumeric(char) or char == '-' or char == '_') {
+        self.current += 1;
+        if (!self.isAtEnd()) char = self.source[self.current];
+    }
+
+    // If exists in keyword map, return matching token.
+    const lexeme = self.source[self.start..self.current];
+    self.current -= 1; // ".next()" function advances current, so we roll back one.
+    if (KEYWORD_MAP.get(lexeme)) |kw_token|
+        return kw_token;
+
+    // If not, return identifier token type.
+    return TokenType.IDENTIFIER;
+}
+
+fn skipWhitespaceAndComments(self: *Self) !void {
+    while (self.skipWhitespace() or try self.skipComment()) {
+        // This will skip both.
+    }
+}
+
+fn skipComment(self: *Self) !bool {
+    if (self.isAtEnd()) return false; // Is this necessary? Maybe better to be safe.
+    var char = self.source[self.current];
+    var maybe_next = if (self.current + 1 < self.source.len)
+        self.source[self.current + 1]
+    else
+        null;
+    var has_skipped = false;
+
+    // This is expensive. But runs only for comments so It should be fine.
+    if (!self.isAtEnd() and char == '/' and (maybe_next == '/' or maybe_next == '*')) {
+        has_skipped = true;
+        if (maybe_next == '/') { // Single-line comments
+            while (!self.isAtEnd() and char != '\n') {
+                self.current += 1;
+                if (!self.isAtEnd()) char = self.source[self.current];
+            }
+        } else { // Multi-line comments
+            // Technically with this /*/ is a comment, but it seems unlikely to be an issue.
+            while (char != '*' or maybe_next != '/') {
+                self.current += 1;
+                if (!self.isAtEnd()) {
+                    char = self.source[self.current];
+                    maybe_next = if (self.current + 1 < self.source.len)
+                        self.source[self.current + 1]
+                    else
+                        null;
+                } else {
+                    return error.UnterminatedMultilineComment;
+                }
+            }
+            self.current += 2; // Skip '*/'
+        }
+    }
+
+    return has_skipped;
+}
+
+fn skipWhitespace(self: *Self) bool {
+    if (self.isAtEnd()) return false; // Is this necessary? Maybe better to be safe.
+    var char = self.source[self.current];
+    var has_skipped = false;
+    while (!self.isAtEnd() and std.ascii.isWhitespace(char)) {
+        has_skipped = true;
+        self.current += 1;
+        if (!self.isAtEnd()) char = self.source[self.current];
+    }
+    return has_skipped;
+}
+
+test "Lex single character tokens" {
+    const source = "(){}[]";
+    var lexer = Self{ .source = source };
+
+    for ([_]TokenType{
+        .LEFT_PAREN,
+        .RIGHT_PAREN,
+        .LEFT_CURLY,
+        .RIGHT_CURLY,
+        .LEFT_SQUARE,
+        .RIGHT_SQUARE,
+    }, 0..) |expected_token_type, idx| {
+        const expected_token = Token{
+            .type = expected_token_type,
+            .span = .{ .start = idx, .end = idx + 1 },
+            .lexeme = source[idx .. idx + 1],
+        };
+        try std.testing.expectEqualDeep(expected_token, try lexer.next());
+    }
+}
+
+test "Lex keywords and identifiers" {
+    const source = "simple with_underscore import";
+    var lexer = Self{ .source = source };
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .IDENTIFIER,
+        .span = .{ .start = 0, .end = 6 },
+        .lexeme = "simple",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .IDENTIFIER,
+        .span = .{ .start = 7, .end = 22 },
+        .lexeme = "with_underscore",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .KW_IMPORT,
+        .span = .{ .start = 23, .end = 29 },
+        .lexeme = "import",
+    }, try lexer.next());
+}
+
+test "Lex comments and whitespace characters" {
+    const source =
+        \\ // This is a first comment.
+        \\ // This is a second comment.
+        \\
+        \\ // And this one is preceded with newline
+        \\ /* I am multiline
+        \\ comment */
+    ;
+    var lexer = Self{ .source = source };
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .EOF,
+        .span = .{ .start = source.len, .end = source.len },
+        .lexeme = "",
+    }, try lexer.next());
 }
