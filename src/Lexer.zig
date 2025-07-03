@@ -178,7 +178,8 @@ fn lexIdentifierOrKW(self: *Self) TokenType {
 // Lex any number.
 // This function parses an number and then attempts to match
 // it as integer or float.
-// Currently it only supports integers, but it can be extended to support floats.
+// This implementation is still missing support for exponential notation
+// and other radices, but It can be extended in the future.
 fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     // Make space for clean number buffer.
     var clean_buffer: [128]u8 = undefined;
@@ -215,25 +216,25 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     // If last character is not a digit, this is not a valid number.
     if (!last_char_is_digit) return error.InvalidToken;
 
-    const cleand_str = clean_buffer[0..clean_len];
+    const cleaned_str = clean_buffer[0..clean_len];
     self.current -= 1; // ".next()" function advances current, so we roll back one.
 
     if (is_float) {
         // If we have a float, parse it as float.
         // If it fails, it means that the number is not valid.
-        const parsed_float = std.fmt.parseFloat(f64, cleand_str) catch return error.InvalidToken;
+        const parsed_float = std.fmt.parseFloat(f64, cleaned_str) catch return error.InvalidToken;
 
         // Return float token type and modify literal value.
-        literal_value.* = LiteralValue{ .float = parsed_float };
+        literal_value.* = .{ .float = parsed_float };
         return TokenType.FLOAT_LITERAL;
     }
 
     // Else parse the number as integer.
     // If it fails, it means that the number is not valid.
-    const parsed_int = std.fmt.parseInt(u64, cleand_str, 10) catch return error.InvalidToken;
+    const parsed_int = std.fmt.parseInt(u64, cleaned_str, 10) catch return error.InvalidToken;
 
     // Return integer token type and modify literal value.
-    literal_value.* = LiteralValue{ .integer = parsed_int };
+    literal_value.* = .{ .integer = parsed_int };
     return TokenType.INTEGER_LITERAL;
 }
 
@@ -345,21 +346,21 @@ test "Lex numbers" {
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 0, .end = 3 },
         .lexeme = "123",
-        .literal = LiteralValue{ .integer = 123 },
+        .literal = .{ .integer = 123 },
     }, try lexer.next());
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 4, .end = 13 },
         .lexeme = "4_567_890",
-        .literal = LiteralValue{ .integer = 4567890 },
+        .literal = .{ .integer = 4567890 },
     }, try lexer.next());
 
     try std.testing.expectEqualDeep(Token{
         .type = .FLOAT_LITERAL,
         .span = .{ .start = 14, .end = 20 },
         .lexeme = "42.321",
-        .literal = LiteralValue{ .float = 42.321 },
+        .literal = .{ .float = 42.321 },
     }, try lexer.next());
 }
 
