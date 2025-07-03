@@ -1,9 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    // Setup target and optimization options.
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Create modules.
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -16,6 +18,15 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Setup dependencies.
+    const reportz_dep = b.dependency("reportz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const reportz_lib = reportz_dep.module("reportz");
+    lib_mod.addImport("reportz", reportz_lib);
+
+    // Link and configure everything.
     exe_mod.addImport("patapim", lib_mod);
 
     const lib = b.addLibrary(.{

@@ -3,6 +3,8 @@
 
 const std = @import("std");
 
+const reportz = @import("reportz");
+
 const common = @import("common.zig");
 
 // Start index of the current token.
@@ -11,13 +13,24 @@ start: usize = 0,
 // Current index when parsing tokens.
 // Often the end of token span.
 current: usize = 0,
+// ID of the source being scanned.
+// This defaults to "internal<lexer>".
+source_id: []const u8 = "internal<lexer>",
 // Slice of source code.
 source: []const u8,
+
+// Error that this lexer produced.
+// Lexer should only produce one error before failing the compilation
+diagnostic: ?reportz.reports.Diagnostic = null,
 
 const Self = @This();
 const LOG = std.log.scoped(.lexer);
 
-pub const Error = error{ InvalidToken, UnterminatedMultilineComment };
+pub const Error = error{
+    InvalidToken,
+    UnterminatedMultilineComment,
+    InvalidNumberLiteral,
+};
 
 pub const LiteralValue = union(enum) {
     none: void,
@@ -98,6 +111,30 @@ pub const TokenType = enum {
     EOF, // End of file.
 };
 
+// Internal method for reporting error diagnostics.
+// This should be called in place of `error.*` whenever returning any errors.
+// Please examine the code below to get more details on usage before implementing new features.
+fn reportError(self: *Self, code: []const u8, message: []const u8, error_type: Self.Error) Self.Error {
+    // This tells the compiler this function is unlikely to be called.
+    @branchHint(.cold);
+
+    self.diagnostic = reportz.reports.Diagnostic{
+        .source_id = self.source_id,
+        .severity = .@"error",
+        .code = code,
+        .message = message,
+        .labels = &.{
+            reportz.reports.Label{
+                .color = .{ .basic = .magenta },
+                .message = "During scanning of this token",
+                .span = .{ .start = self.start, .end = self.current },
+            },
+        },
+    };
+
+    return error_type;
+}
+
 // Check whether lexer has reached the end of source being scanned.
 pub inline fn isAtEnd(self: *Self) bool {
     return self.current >= self.source.len;
@@ -114,7 +151,7 @@ pub fn next(self: *Self) Self.Error!Token {
     };
 
     if (self.isAtEnd()) return eof;
-    try self.skipWhitespaceAndComments(); // TODO: Catch and pretty print error.
+    try self.skipWhitespaceAndComments();
     self.start = self.current; // Update start index after comments and ws.
     if (self.isAtEnd()) return eof;
 
@@ -199,7 +236,7 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
             last_char_is_digit = false;
         } else if (char == '.') {
             // If we already have a dot, this is not a valid number.
-            if (is_float) return error.InvalidToken;
+            if (is_float) return self.reportError("L02", "Floating number has multiple dots.", error.InvalidNumberLiteral);
 
             clean_buffer[clean_len] = char;
             clean_len += 1;
@@ -214,7 +251,7 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     }
 
     // If last character is not a digit, this is not a valid number.
-    if (!last_char_is_digit) return error.InvalidToken;
+    if (!last_char_is_digit) return self.reportError("L03", "Last character in numeric literal may not be '_'.", error.InvalidNumberLiteral);
 
     const cleaned_str = clean_buffer[0..clean_len];
     self.current -= 1; // ".next()" function advances current, so we roll back one.
@@ -222,7 +259,10 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     if (is_float) {
         // If we have a float, parse it as float.
         // If it fails, it means that the number is not valid.
-        const parsed_float = std.fmt.parseFloat(f64, cleaned_str) catch return error.InvalidToken;
+        const parsed_float = std.fmt.parseFloat(f64, cleaned_str) catch |err| {
+            LOG.err("Error while calling parseFloat(...). This should not occur! Error message: {any}", .{err});
+            return self.reportError("L04", "Invalid number literal. If you see this please open an issue on github.", error.InvalidNumberLiteral);
+        };
 
         // Return float token type and modify literal value.
         literal_value.* = .{ .float = parsed_float };
@@ -231,7 +271,10 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
 
     // Else parse the number as integer.
     // If it fails, it means that the number is not valid.
-    const parsed_int = std.fmt.parseInt(u64, cleaned_str, 10) catch return error.InvalidToken;
+    const parsed_int = std.fmt.parseInt(u64, cleaned_str, 10) catch |err| {
+        LOG.err("Error while calling parseInt(...). This should not occur! Error message: {any}", .{err});
+        return self.reportError("L05", "Invalid number literal. If you see this please open an issue on github.", error.InvalidNumberLiteral);
+    };
 
     // Return integer token type and modify literal value.
     literal_value.* = .{ .integer = parsed_int };
@@ -272,7 +315,7 @@ fn skipComment(self: *Self) !bool {
                     else
                         null;
                 } else {
-                    return error.UnterminatedMultilineComment;
+                    return self.reportError("L01", "Unterminated multiline comment.", error.UnterminatedMultilineComment);
                 }
             }
             self.current += 2; // Skip '*/'

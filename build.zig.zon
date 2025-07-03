@@ -17,7 +17,12 @@
     // modify the field.
     .fingerprint = 0xeea9a098f48200be, // Changing this has security and trust implications.
     .minimum_zig_version = "0.14.1",
-    .dependencies = .{},
+    .dependencies = .{
+        .reportz = .{
+            .url = "git+https://github.com/olix3001/reportz#422538fc03e82f07249a42e7e97b965bdd0d4f58",
+            .hash = "reportz-0.1.0-IFVX6nAgAQDwJf13WjDpXkGOq5PcCpyCJbQ6nvK7oz39",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
