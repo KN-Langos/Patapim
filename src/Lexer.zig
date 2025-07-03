@@ -126,7 +126,7 @@ fn reportError(self: *Self, code: []const u8, message: []const u8, error_type: S
         .labels = &.{
             reportz.reports.Label{
                 .color = .{ .basic = .magenta },
-                .message = "During scanning of this token",
+                .message = "During scanning of this token.",
                 .span = .{ .start = self.start, .end = self.current },
             },
         },
