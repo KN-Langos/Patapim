@@ -215,8 +215,8 @@ fn lexIdentifierOrKW(self: *Self) TokenType {
 // Lex any number.
 // This function parses an number and then attempts to match
 // it as integer or float.
-// This implementation is still missing support for exponential notation
-// and other radices, but It can be extended in the future.
+// This implementation is still missing support for exponential notation,
+// but it can be extended in the future.
 fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     // Make space for clean number buffer.
     var clean_buffer: [128]u8 = undefined;
@@ -224,11 +224,38 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
 
     var is_float: bool = false;
     var last_char_is_digit: bool = true;
+    var base: u8 = 10; // Default base is decimal.
 
     // Parse until end of number.
     var char = self.source[self.current];
+
+    if (!self.isAtEnd() and char == '0') {
+        const next_char = if (self.current + 1 < self.source.len) self.source[self.current + 1] else '?';
+        self.current += 2; // Skip '0' and next character.
+        switch (next_char) {
+            'b', 'B' => {
+                base = 2; // Binary.
+                if (self.isAtEnd()) return self.reportError("L06", "Invalid number literal. Expected binary number after '0b'.", error.InvalidNumberLiteral);
+                char = self.source[self.current];
+            },
+            'o', 'O' => {
+                base = 8; // Octal.
+                if (self.isAtEnd()) return self.reportError("L07", "Invalid number literal. Expected octal number after '0o'.", error.InvalidNumberLiteral);
+                char = self.source[self.current];
+            },
+            'x', 'X' => {
+                base = 16; // Hexadecimal.
+                if (self.isAtEnd()) return self.reportError("L08", "Invalid number literal. Expected hexadecimal number after '0x'.", error.InvalidNumberLiteral);
+                char = self.source[self.current];
+            },
+            else => {
+                self.current -= 2; // Roll back to '0'.
+            },
+        }
+    }
+
     while (!self.isAtEnd()) {
-        if (std.ascii.isDigit(char)) {
+        if (isValidDigitForBase(char, base)) {
             clean_buffer[clean_len] = char;
             clean_len += 1;
             last_char_is_digit = true;
@@ -237,6 +264,9 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
         } else if (char == '.') {
             // If we already have a dot, this is not a valid number.
             if (is_float) return self.reportError("L02", "Floating number has multiple dots.", error.InvalidNumberLiteral);
+
+            // If we have a dot, it must be in decimal numbers.
+            if (base != 10) return self.reportError("L09", "Floating point numbers are only supported in decimal base.", error.InvalidNumberLiteral);
 
             clean_buffer[clean_len] = char;
             clean_len += 1;
@@ -271,7 +301,7 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
 
     // Else parse the number as integer.
     // If it fails, it means that the number is not valid.
-    const parsed_int = std.fmt.parseInt(u64, cleaned_str, 10) catch |err| {
+    const parsed_int = std.fmt.parseInt(u64, cleaned_str, base) catch |err| {
         LOG.err("Error while calling parseInt(...). This should not occur! Error message: {any}", .{err});
         return self.reportError("L05", "Invalid number literal. If you see this please open an issue on github.", error.InvalidNumberLiteral);
     };
@@ -279,6 +309,18 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     // Return integer token type and modify literal value.
     literal_value.* = .{ .integer = parsed_int };
     return TokenType.INTEGER_LITERAL;
+}
+
+fn isValidDigitForBase(c: u8, base: u8) bool {
+    // Check if character is a valid digit for given base.
+    // For bases 2, 8, 10, and 16.
+    return switch (base) {
+        2 => c == '0' or c == '1',
+        8 => c >= '0' and c <= '7',
+        10 => c >= '0' and c <= '9',
+        16 => (c >= '0' and c <= '9') or (c >= 'A' and c <= 'F') or (c >= 'a' and c <= 'f'),
+        else => false, // Invalid base.
+    };
 }
 
 fn skipWhitespaceAndComments(self: *Self) !void {
@@ -382,7 +424,7 @@ test "Lex keywords and identifiers" {
 }
 
 test "Lex numbers" {
-    const source = "123 4_567_890 42.321";
+    const source = "123 4_567_890 42.321 0b1010 0o67 0x1F4 0";
     var lexer = Self{ .source = source };
 
     try std.testing.expectEqualDeep(Token{
@@ -404,6 +446,34 @@ test "Lex numbers" {
         .span = .{ .start = 14, .end = 20 },
         .lexeme = "42.321",
         .literal = .{ .float = 42.321 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 21, .end = 27 },
+        .lexeme = "0b1010",
+        .literal = .{ .integer = 10 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 28, .end = 32 },
+        .lexeme = "0o67",
+        .literal = .{ .integer = 55 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 33, .end = 38 },
+        .lexeme = "0x1F4",
+        .literal = .{ .integer = 500 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 39, .end = 40 },
+        .lexeme = "0",
+        .literal = .{ .integer = 0 },
     }, try lexer.next());
 }
 
