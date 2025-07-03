@@ -36,7 +36,26 @@ pub const Token = struct {
 pub const KEYWORD_MAP: std.StaticStringMap(TokenType) = .initComptime(.{
     .{ "import", .KW_IMPORT },
     .{ "as", .KW_AS },
-    // TODO: [...]
+    .{ "struct", .KW_STRUCT },
+    .{ "enum", .KW_ENUM },
+    .{ "true", .KW_TRUE },
+    .{ "false", .KW_FALSE },
+    .{ "if", .KW_IF },
+    .{ "else", .KW_ELSE },
+    .{ "return", .KW_RETURN },
+    .{ "error", .KW_ERROR },
+    .{ "loop", .KW_LOOP },
+    .{ "while", .KW_WHILE },
+    .{ "do", .KW_DO },
+    .{ "for", .KW_FOR },
+    .{ "break", .KW_BREAK },
+    .{ "continue", .KW_CONTINUE },
+    .{ "in", .KW_IN },
+    .{ "fn", .KW_FUNCTION },
+    .{ "brr", .KW_VARIABLE },
+    .{ "const", .KW_CONST },
+    .{ "native", .KW_NATIVE },
+    .{ "iserror", .KW_ISERROR },
 });
 
 pub const TokenType = enum {
@@ -51,7 +70,26 @@ pub const TokenType = enum {
     // Keywords:
     KW_IMPORT,
     KW_AS,
-    // TODO: [...]
+    KW_STRUCT,
+    KW_ENUM,
+    KW_TRUE,
+    KW_FALSE,
+    KW_IF,
+    KW_ELSE,
+    KW_RETURN,
+    KW_ERROR,
+    KW_LOOP,
+    KW_WHILE,
+    KW_DO,
+    KW_FOR,
+    KW_BREAK,
+    KW_CONTINUE,
+    KW_IN,
+    KW_FUNCTION,
+    KW_VARIABLE,
+    KW_CONST,
+    KW_NATIVE,
+    KW_ISERROR,
 
     // Special tokens:
     IDENTIFIER,

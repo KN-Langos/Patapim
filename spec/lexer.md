@@ -81,6 +81,8 @@ Names are just examples, they can be changed in the implementation.
 'while' KW_WHILE
 'do' KW_DO
 'for' KW_FOR
+'break' KW_BREAK
+'continue' KW_CONTINUE
 'in' KW_IN
 'fn' KW_FUNCTION
 'brr' KW_VARIABLE
