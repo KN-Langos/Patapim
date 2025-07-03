@@ -92,6 +92,8 @@ pub const TokenType = enum {
     KW_ISERROR,
 
     // Special tokens:
+    INTEGER_LITERAL,
+    FLOAT_LITERAL,
     IDENTIFIER,
     EOF, // End of file.
 };
@@ -116,10 +118,11 @@ pub fn next(self: *Self) Self.Error!Token {
     self.start = self.current; // Update start index after comments and ws.
     if (self.isAtEnd()) return eof;
 
-    // Match token with predefined list.
     const char = self.source[self.current];
-    const literal_value: LiteralValue = .none;
-    const token_type: TokenType = switch (char) {
+    var literal_value: LiteralValue = .none;
+
+    // Match token with predefined list.
+    const token_type = switch (char) {
         '(' => .LEFT_PAREN,
         ')' => .RIGHT_PAREN,
         '{' => .LEFT_CURLY,
@@ -128,6 +131,7 @@ pub fn next(self: *Self) Self.Error!Token {
         ']' => .RIGHT_SQUARE,
 
         'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
+        '0'...'9' => try self.lexNumber(&literal_value),
         else => return error.InvalidToken,
     };
 
@@ -169,6 +173,68 @@ fn lexIdentifierOrKW(self: *Self) TokenType {
 
     // If not, return identifier token type.
     return TokenType.IDENTIFIER;
+}
+
+// Lex any number.
+// This function parses an number and then attempts to match
+// it as integer or float.
+// Currently it only supports integers, but it can be extended to support floats.
+fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
+    // Make space for clean number buffer.
+    var clean_buffer: [128]u8 = undefined;
+    var clean_len: usize = 0;
+
+    var is_float: bool = false;
+    var last_char_is_digit: bool = true;
+
+    // Parse until end of number.
+    var char = self.source[self.current];
+    while (!self.isAtEnd()) {
+        if (std.ascii.isDigit(char)) {
+            clean_buffer[clean_len] = char;
+            clean_len += 1;
+            last_char_is_digit = true;
+        } else if (char == '_') {
+            last_char_is_digit = false;
+        } else if (char == '.') {
+            // If we already have a dot, this is not a valid number.
+            if (is_float) return error.InvalidToken;
+
+            clean_buffer[clean_len] = char;
+            clean_len += 1;
+            last_char_is_digit = false;
+            is_float = true;
+        } else {
+            break; // End of number.
+        }
+
+        self.current += 1;
+        if (!self.isAtEnd()) char = self.source[self.current];
+    }
+
+    // If last character is not a digit, this is not a valid number.
+    if (!last_char_is_digit) return error.InvalidToken;
+
+    const cleand_str = clean_buffer[0..clean_len];
+    self.current -= 1; // ".next()" function advances current, so we roll back one.
+
+    if (is_float) {
+        // If we have a float, parse it as float.
+        // If it fails, it means that the number is not valid.
+        const parsed_float = std.fmt.parseFloat(f64, cleand_str) catch return error.InvalidToken;
+
+        // Return float token type and modify literal value.
+        literal_value.* = LiteralValue{ .float = parsed_float };
+        return TokenType.FLOAT_LITERAL;
+    }
+
+    // Else parse the number as integer.
+    // If it fails, it means that the number is not valid.
+    const parsed_int = std.fmt.parseInt(u64, cleand_str, 10) catch return error.InvalidToken;
+
+    // Return integer token type and modify literal value.
+    literal_value.* = LiteralValue{ .integer = parsed_int };
+    return TokenType.INTEGER_LITERAL;
 }
 
 fn skipWhitespaceAndComments(self: *Self) !void {
@@ -268,6 +334,32 @@ test "Lex keywords and identifiers" {
         .type = .KW_IMPORT,
         .span = .{ .start = 23, .end = 29 },
         .lexeme = "import",
+    }, try lexer.next());
+}
+
+test "Lex numbers" {
+    const source = "123 4_567_890 42.321";
+    var lexer = Self{ .source = source };
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 0, .end = 3 },
+        .lexeme = "123",
+        .literal = LiteralValue{ .integer = 123 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 4, .end = 13 },
+        .lexeme = "4_567_890",
+        .literal = LiteralValue{ .integer = 4567890 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 14, .end = 20 },
+        .lexeme = "42.321",
+        .literal = LiteralValue{ .float = 42.321 },
     }, try lexer.next());
 }
 
