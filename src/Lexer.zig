@@ -7,6 +7,9 @@ const reportz = @import("reportz");
 
 const common = @import("common.zig");
 
+// This is unfortunately required for parsing string literals,
+// as we may need to replace escape sequences.
+allocator: std.mem.Allocator,
 // Start index of the current token.
 // This is used for generation of proper spans.
 start: usize = 0,
@@ -30,12 +33,18 @@ pub const Error = error{
     InvalidToken,
     UnterminatedMultilineComment,
     InvalidNumberLiteral,
-};
+    InvalidCharacterLiteral,
+    UnterminatedStringLiteral,
+    UnterminatedCharacterLiteral,
+    InvalidEscapeSequence,
+} || std.mem.Allocator.Error;
 
 pub const LiteralValue = union(enum) {
     none: void,
     integer: u64,
     float: f64,
+    char: u8,
+    string: []const u8,
 };
 
 pub const Token = struct {
@@ -107,6 +116,8 @@ pub const TokenType = enum {
     // Special tokens:
     INTEGER_LITERAL,
     FLOAT_LITERAL,
+    CHAR_LITERAL,
+    STRING_LITERAL,
     IDENTIFIER,
     EOF, // End of file.
 };
@@ -169,6 +180,8 @@ pub fn next(self: *Self) Self.Error!Token {
 
         'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
         '0'...'9' => try self.lexNumber(&literal_value),
+        '\'' => try self.lexCharacter(&literal_value),
+        '"' => try self.lexString(&literal_value),
         else => return error.InvalidToken,
     };
 
@@ -323,6 +336,76 @@ fn isValidDigitForBase(c: u8, base: u8) bool {
     };
 }
 
+// Lex character literal. Character literals are single ascii characters
+// inside of `'' characters.
+fn lexCharacter(self: *Self, literal_value: *LiteralValue) Self.Error!TokenType {
+    self.current += 1; // This is only called after `'` is detected.
+    if (self.isAtEnd())
+        return self.reportError("L10", "Unexpected EOF in character literal.", error.InvalidCharacterLiteral);
+    const char = self.source[self.current];
+    const char_literal = if (char == '\\')
+        try self.unescapeSequence()
+    else
+        char;
+    literal_value.* = .{ .char = char_literal };
+    self.current += 1;
+    if (self.isAtEnd())
+        return self.reportError("L10", "Unexpected EOF in character literal.", error.InvalidCharacterLiteral);
+    if (self.source[self.current] != '\'')
+        return self.reportError("L12", "Unexpected EOF in character literal.", error.UnterminatedCharacterLiteral);
+    return TokenType.CHAR_LITERAL;
+}
+
+// Lex string literal. Character literals are everything delimited by `"` characters.
+fn lexString(self: *Self, literal_value: *LiteralValue) Self.Error!TokenType {
+    self.current += 1; // This is only called after `"` is detected.
+    if (self.isAtEnd())
+        return self.reportError("L13", "Unterminated string literal", error.UnterminatedStringLiteral);
+
+    var string_value = std.ArrayList(u8).init(self.allocator);
+    // This function may fail early, in such case we should deinit to avoid leaks.
+    errdefer string_value.deinit();
+
+    var char = self.source[self.current];
+    while (char != '"') {
+        try string_value.append(if (char == '\\')
+            try self.unescapeSequence()
+        else
+            char);
+        self.current += 1;
+        if (self.isAtEnd()) {
+            return self.reportError("L13", "Unterminated string literal", error.UnterminatedStringLiteral);
+        }
+        char = self.source[self.current];
+    }
+
+    literal_value.* = .{ .string = try string_value.toOwnedSlice() };
+    return TokenType.STRING_LITERAL;
+}
+
+fn unescapeSequence(self: *Self) !u8 {
+    if (self.source[self.current] != '\\')
+        @panic("unescapeSequence method should never be called before checking '\\' character.");
+    self.current += 1;
+    if (self.isAtEnd())
+        return self.reportError("L11", "Unexpected EOF in escape sequence.", error.InvalidEscapeSequence);
+    const char = self.source[self.current];
+    return blk: switch (char) {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '\\' => '\\',
+        '\'' => '\'',
+        '"' => '"',
+        'x' => {
+            // This is `\xNN`, where NN is one byte in hexadecimal.
+            // TODO: Parse this while properly checking validity of hex number.
+            break :blk '#'; // I needed to put something here.
+        },
+        else => return self.reportError("L12", "Unknown escape sequence.", error.InvalidEscapeSequence),
+    };
+}
+
 fn skipWhitespaceAndComments(self: *Self) !void {
     while (self.skipWhitespace() or try self.skipComment()) {
         // This will skip both.
@@ -381,7 +464,10 @@ fn skipWhitespace(self: *Self) bool {
 
 test "Lex single character tokens" {
     const source = "(){}[]";
-    var lexer = Self{ .source = source };
+    var lexer = Self{
+        .allocator = std.testing.allocator,
+        .source = source,
+    };
 
     for ([_]TokenType{
         .LEFT_PAREN,
@@ -402,7 +488,10 @@ test "Lex single character tokens" {
 
 test "Lex keywords and identifiers" {
     const source = "simple with_underscore import";
-    var lexer = Self{ .source = source };
+    var lexer = Self{
+        .allocator = std.testing.allocator,
+        .source = source,
+    };
 
     try std.testing.expectEqualDeep(Token{
         .type = .IDENTIFIER,
@@ -425,7 +514,10 @@ test "Lex keywords and identifiers" {
 
 test "Lex numbers" {
     const source = "123 4_567_890 42.321 0b1010 0o67 0x1F4 0";
-    var lexer = Self{ .source = source };
+    var lexer = Self{
+        .allocator = std.testing.allocator,
+        .source = source,
+    };
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
@@ -477,6 +569,54 @@ test "Lex numbers" {
     }, try lexer.next());
 }
 
+test "Lex character and string literals" {
+    const source =
+        \\ 'a' '\n'
+        \\ "Hello" "Hello world" "Lorem\nIpsum"
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var lexer = Self{
+        .allocator = arena.allocator(),
+        .source = source,
+    };
+    defer arena.deinit();
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .CHAR_LITERAL,
+        .span = .{ .start = 1, .end = 4 },
+        .lexeme = "'a'",
+        .literal = .{ .char = 'a' },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .CHAR_LITERAL,
+        .span = .{ .start = 5, .end = 9 },
+        .lexeme = "'\\n'",
+        .literal = .{ .char = '\n' },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .STRING_LITERAL,
+        .span = .{ .start = 11, .end = 18 },
+        .lexeme = "\"Hello\"",
+        .literal = .{ .string = "Hello" },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .STRING_LITERAL,
+        .span = .{ .start = 19, .end = 32 },
+        .lexeme = "\"Hello world\"",
+        .literal = .{ .string = "Hello world" },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .STRING_LITERAL,
+        .span = .{ .start = 33, .end = 47 },
+        .lexeme = "\"Lorem\\nIpsum\"",
+        .literal = .{ .string = "Lorem\nIpsum" },
+    }, try lexer.next());
+}
+
 test "Lex comments and whitespace characters" {
     const source =
         \\ // This is a first comment.
@@ -486,7 +626,10 @@ test "Lex comments and whitespace characters" {
         \\ /* I am multiline
         \\ comment */
     ;
-    var lexer = Self{ .source = source };
+    var lexer = Self{
+        .allocator = std.testing.allocator,
+        .source = source,
+    };
 
     try std.testing.expectEqualDeep(Token{
         .type = .EOF,
