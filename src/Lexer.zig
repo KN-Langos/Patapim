@@ -89,7 +89,7 @@ pub const TokenType = enum {
     GREATER_EQUAL, // '>='
 
     //Logical and Bitwise Operators
-    BANG, // '!'     ( kto to tak nazywa XD?)
+    BANG, // '!'
     BITWISE_OR, // '|'
     BITWISE_AND, // '&'
     BITWISE_XOR, // '^'
@@ -102,7 +102,7 @@ pub const TokenType = enum {
     BITWISE_OR_ASSIGN, //'|='
     BITWISE_AND_ASSIGN, // '&='
     BITWISE_XOR_ASSIGN, // '^='
-    ASSIGN, // '='   // nwm gdzie to wjebac tbh
+    ASSIGN, // '='
 
     //Math operators
     ADD, // '+'
@@ -121,6 +121,16 @@ pub const TokenType = enum {
     DECREMENT, // '--'
 
     //Special Symbols ( to do )
+    SEMICOLON, //';'
+    COLON, // ':'
+    DOT, // '.'
+    RANGE, // '..'
+    SPREAD, // '...'
+    ARROW, // '->'
+    AT, // '@'
+    HASH, // '#'
+    QUESTION, // '?'
+    DOLLAR, // '$'
 
     // Keywords:
     KW_IMPORT,
@@ -208,7 +218,16 @@ pub fn next(self: *Self) Self.Error!Token {
         '}' => .RIGHT_CURLY,
         '[' => .LEFT_SQUARE,
         ']' => .RIGHT_SQUARE,
-        '!', '*', '+', '-', '<'...'>', '/', '^', '&', '%', '|' => self.lexOperators(),
+        ';' => .SEMICOLON,
+        ':' => .COLON,
+        '@' => .AT,
+        '#' => .HASH,
+        '?' => .QUESTION,
+        '$' => .DOLLAR,
+
+        '.' => self.lexDots(),
+
+        '!', '*', '+', '-', '<', '=', '>', '/', '^', '&', '%', '|' => self.lexOperators(),
         'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
         '0'...'9' => try self.lexNumber(&literal_value),
         else => return error.InvalidToken,
@@ -233,6 +252,32 @@ pub fn next(self: *Self) Self.Error!Token {
     return result_token;
 }
 
+// start with one dot, check if any more, return equivalent Token
+fn lexDots(self: *Self) TokenType {
+    var secondChar: u8 = 0;
+    var thirdChar: u8 = 0;
+
+    self.current += 1;
+    if (!self.isAtEnd()) {
+        secondChar = self.source[self.current];
+        self.current += 1;
+        if (!self.isAtEnd()) {
+            thirdChar = self.source[self.current];
+        }
+    }
+
+    if (secondChar == '.') {
+        if (thirdChar == '.') {
+            return .SPREAD;
+        }
+        self.current -= 1;
+        return .RANGE;
+    }
+    self.current -= 2;
+    return .DOT;
+}
+
+//get char associated with operators, lex and return equivalent Token from 1 or 2 char operators
 fn lexOperators(self: *Self) TokenType {
     const char1: u8 = self.source[self.current];
     self.current += 1;
@@ -307,6 +352,7 @@ fn lexOperators(self: *Self) TokenType {
         '-' => switch (char2) {
             '=' => return .SUB_ASSIGN,
             '-' => return .DECREMENT,
+            '>' => return .ARROW, // implement it here for simplicity
             else => {
                 self.current -= 1;
                 return .SUBTRACT;
@@ -333,7 +379,8 @@ fn lexOperators(self: *Self) TokenType {
                 return .MODULO;
             },
         },
-        else => return .EOF,
+
+        else => unreachable,
     }
 }
 
@@ -557,7 +604,7 @@ fn skipWhitespace(self: *Self) bool {
 }
 
 test "Lex single character tokens" {
-    const source = "(){}[]";
+    const source = "(){}[];:@#?$";
     var lexer = Self{ .source = source };
 
     for ([_]TokenType{
@@ -567,6 +614,12 @@ test "Lex single character tokens" {
         .RIGHT_CURLY,
         .LEFT_SQUARE,
         .RIGHT_SQUARE,
+        .SEMICOLON,
+        .COLON,
+        .AT,
+        .HASH,
+        .QUESTION,
+        .DOLLAR,
     }, 0..) |expected_token_type, idx| {
         const expected_token = Token{
             .type = expected_token_type,
@@ -701,7 +754,7 @@ test "Lex comments and whitespace characters" {
 }
 
 test "Lex operators" {
-    const source = "== > <= != << + ++ -- || ^ =";
+    const source = "== > <= != << + ++ -- || ^ = . ... ..";
     var lexer = Self{ .source = source };
 
     try std.testing.expectEqualDeep(Token{
@@ -768,5 +821,23 @@ test "Lex operators" {
         .type = .ASSIGN,
         .span = .{ .start = 27, .end = 28 },
         .lexeme = "=",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .DOT,
+        .span = .{ .start = 29, .end = 30 },
+        .lexeme = ".",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .SPREAD,
+        .span = .{ .start = 31, .end = 34 },
+        .lexeme = "...",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .RANGE,
+        .span = .{ .start = 35, .end = 37 },
+        .lexeme = "..",
     }, try lexer.next());
 }
