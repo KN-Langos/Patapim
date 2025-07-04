@@ -223,6 +223,7 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     var clean_len: usize = 0;
 
     var is_float: bool = false;
+    var is_scientific: bool = false;
     var last_char_is_digit: bool = true;
     var base: u8 = 10; // Default base is decimal.
 
@@ -230,7 +231,7 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     var char = self.source[self.current];
 
     if (!self.isAtEnd() and char == '0') {
-        const next_char = if (self.current + 1 < self.source.len) self.source[self.current + 1] else '?';
+        const next_char = if (!self.isAtEnd()) self.source[self.current + 1] else '?';
         self.current += 2; // Skip '0' and next character.
         switch (next_char) {
             'b', 'B' => {
@@ -260,18 +261,48 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
             clean_len += 1;
             last_char_is_digit = true;
         } else if (char == '_') {
+            if (!(std.ascii.isDigit(self.source[self.current - 1]) and !self.isAtEnd() and std.ascii.isDigit(self.source[self.current + 1]))) {
+                // If '_' is not between digits, this is not a valid number.
+                return self.reportError("L11", "Underscore in numeric literal must be between digits.", error.InvalidNumberLiteral);
+            }
+
             last_char_is_digit = false;
         } else if (char == '.') {
             // If we already have a dot, this is not a valid number.
             if (is_float) return self.reportError("L02", "Floating number has multiple dots.", error.InvalidNumberLiteral);
 
+            // If we have a dot after 'e' or 'E', this is not a valid number.
+            if (is_scientific) return self.reportError("L9", "Floating point numbers in scientific notation are not supported.", error.InvalidNumberLiteral);
+
             // If we have a dot, it must be in decimal numbers.
-            if (base != 10) return self.reportError("L09", "Floating point numbers are only supported in decimal base.", error.InvalidNumberLiteral);
+            if (base != 10) return self.reportError("L10", "Floating point numbers are only supported in decimal base.", error.InvalidNumberLiteral);
 
             clean_buffer[clean_len] = char;
             clean_len += 1;
             last_char_is_digit = false;
             is_float = true;
+        } else if (char == 'e' or char == 'E') {
+            clean_buffer[clean_len] = char;
+            clean_len += 1;
+            // Check if next character is '+' or '-'.
+            const next_char = if (!self.isAtEnd()) self.source[self.current + 1] else '?';
+            self.current += 2; // Skip 'e' and next character.
+
+            switch (next_char) {
+                '+' => {},
+                '-' => {
+                    clean_buffer[clean_len] = next_char;
+                    clean_len += 1;
+                },
+                else => {
+                    self.current -= 1; // Roll back to char after 'e'.
+                },
+            }
+
+            self.current -= 1; // Roll back to 'e'.
+            is_scientific = true;
+            is_float = true;
+            last_char_is_digit = false;
         } else {
             break; // End of number.
         }
@@ -281,7 +312,7 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
     }
 
     // If last character is not a digit, this is not a valid number.
-    if (!last_char_is_digit) return self.reportError("L03", "Last character in numeric literal may not be '_'.", error.InvalidNumberLiteral);
+    if (!last_char_is_digit) return self.reportError("L03", "Last character in numeric literal must be a digit.", error.InvalidNumberLiteral);
 
     const cleaned_str = clean_buffer[0..clean_len];
     self.current -= 1; // ".next()" function advances current, so we roll back one.
@@ -424,7 +455,7 @@ test "Lex keywords and identifiers" {
 }
 
 test "Lex numbers" {
-    const source = "123 4_567_890 42.321 0b1010 0o67 0x1F4 0";
+    const source = "123 4_567_890 42.321 0b1010 0o67 0x1F4 0 14E4 14e-2 14e+2 14.14e2";
     var lexer = Self{ .source = source };
 
     try std.testing.expectEqualDeep(Token{
@@ -474,6 +505,34 @@ test "Lex numbers" {
         .span = .{ .start = 39, .end = 40 },
         .lexeme = "0",
         .literal = .{ .integer = 0 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 41, .end = 45 },
+        .lexeme = "14E4",
+        .literal = .{ .float = 140000 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 46, .end = 51 },
+        .lexeme = "14e-2",
+        .literal = .{ .float = 0.14 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 52, .end = 57 },
+        .lexeme = "14e+2",
+        .literal = .{ .float = 1400 },
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 58, .end = 65 },
+        .lexeme = "14.14e2",
+        .literal = .{ .float = 1414 },
     }, try lexer.next());
 }
 
