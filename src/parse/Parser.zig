@@ -22,6 +22,8 @@ diagnostic_log: std.ArrayList(reportz.reports.Diagnostic),
 
 // ---< Internal fields begin >---
 cached_token: ?Token = null,
+last_token: ?Token = null,
+span_stack: std.ArrayList(usize),
 // ---< Internal fields end >---
 
 const Self = @This();
@@ -29,6 +31,7 @@ const LOG = std.log.scoped(.parser);
 
 pub const Error = error{
     UnexpectedToken,
+    ExpectedStatement,
 } || Lexer.Error || std.mem.Allocator.Error;
 
 pub fn init(alloc: std.mem.Allocator, lexer: *Lexer) Self {
@@ -38,6 +41,8 @@ pub fn init(alloc: std.mem.Allocator, lexer: *Lexer) Self {
         .lexer = lexer,
         .diagnostic_arena = .init(alloc),
         .diagnostic_log = .init(alloc),
+
+        .span_stack = .init(alloc),
     };
 }
 
@@ -46,6 +51,7 @@ pub fn deinit(self: *Self, deinit_tree: bool) void {
         self.tree.deinit();
     self.diagnostic_log.deinit();
     self.diagnostic_arena.deinit();
+    self.span_stack.deinit();
 }
 
 // ---< Helper and utility functions begin >---
@@ -70,18 +76,18 @@ fn reportError(
 
     const diagnostic_alloc = self.diagnostic_arena.allocator();
 
-    self.diagnostic_log.append(reportz.reports.Diagnostic{
+    try self.diagnostic_log.append(reportz.reports.Diagnostic{
         .source_id = self.lexer.source_id,
         .severity = additional_options.severity,
         .code = code,
-        .message = std.fmt.allocPrint(diagnostic_alloc, message_fmt, message_args),
+        .message = try std.fmt.allocPrint(diagnostic_alloc, message_fmt, message_args),
         // This ensures that labels and notes live at least as long as diagnostic_log field.
-        .labels = common.deepClone(
+        .labels = try common.deepClone(
             []const reportz.reports.Label,
             additional_options.labels,
             diagnostic_alloc,
         ),
-        .notes = common.deepClone(
+        .notes = try common.deepClone(
             []const reportz.reports.Note,
             additional_options.notes,
             diagnostic_alloc,
@@ -95,13 +101,14 @@ fn reportError(
 fn peek(self: *Self) !Token {
     if (self.cached_token) |cached|
         return cached;
-    self.cached_token = try self.lexer.next();
+    self.cached_token = try self.lexer.next(self.tree.allocator());
     return self.cached_token.?; // We may do `.?` because we set it above.
 }
 
 // Advance one token forward and return current token.
 fn advance(self: *Self) !Token {
-    const current_token = self.peek();
+    const current_token = try self.peek();
+    self.last_token = current_token;
     self.cached_token = null;
     return current_token;
 }
@@ -141,4 +148,165 @@ fn maybe(self: *Self, maybe_type: TokenType) Self.Error!?Token {
         null;
 }
 
+// Push new span beginning to the stack.
+// Due to implementation details this function should be called
+// **AFTER** parsing first element in a span.
+fn pushSpan(self: *Self) std.mem.Allocator.Error!void {
+    try self.span_stack.append(self.last_token.?.span.start);
+}
+
+// Push new span beginning to the stack.
+// Opposed to `pushSpan` method, this one uses next token
+// instead of last token.
+fn pushSpanOnNextToken(self: *Self) Self.Error!void {
+    const next_token = try self.peek();
+    try self.span_stack.append(next_token.span.start);
+}
+
+// Get current span from the stack.
+// This function assumes that stack is not empty.
+fn popSpan(self: *Self) common.Span {
+    const span_start = self.span_stack.pop().?;
+    const span_end = self.last_token.?.span.end;
+    return .{ .start = span_start, .end = span_end };
+}
+
+// Get current span from the stack without popping it.
+fn peekSpan(self: *Self) common.Span {
+    const span_start = self.span_stack.getLast();
+    const span_end = self.last_token.?.span.end;
+    return .{ .start = span_start, .end = span_end };
+}
+
+fn expectIdentifier(self: *Self) !usize {
+    const ident = try self.expect(.IDENTIFIER);
+    return self.tree.addNode(.{
+        .span = ident.span,
+        .kind = .{ .identifier = ident.lexeme },
+    });
+}
+
 // ---< Helper and utility functions end >---
+
+// Parse whole source returning main "module" node.
+pub fn parseWholeSource(self: *Self) !usize {
+    var module_statements = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer module_statements.deinit(); // This function may fail early.
+
+    try self.pushSpanOnNextToken();
+    defer _ = self.popSpan(); // We do not need to keep this span on stack after error.
+
+    while (!self.lexer.isAtEnd()) {
+        const stmt = try self.parseAnyStatement();
+        try module_statements.append(stmt);
+        // TODO: Add this back after special tokens are added to the lexer.
+        // self.expect(.SEMICOLON);
+    }
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .module = .{
+            .statements = try module_statements.toOwnedSlice(),
+        } },
+    });
+}
+
+// Parse any statement and return its ID.
+// This function fails if no statement is possible to parse,
+// so ensure there is no EOF before calling this.
+pub fn parseAnyStatement(self: *Self) !usize {
+    try self.pushSpanOnNextToken();
+    defer _ = self.popSpan(); // We need span only in case of an error.
+
+    if (try self.parseMaybeImportStatement()) |stmt| return stmt;
+
+    // If nothing has returned up to this point, we assume that there
+    // is no statement where it should be and panic.
+    return self.reportError(
+        "P002",
+        "Expected statement, but found something else.",
+        .{},
+        error.ExpectedStatement,
+        .{
+            .labels = &.{.{
+                .color = .{ .basic = .magenta },
+                .span = self.peekSpan().asReportz(),
+                .message = "Found this instead.",
+            }},
+        },
+    );
+}
+
+// Parse import statement and return its ID if parsed.
+// For more information please reference `ast.zig -> Import` struct.
+pub fn parseMaybeImportStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_IMPORT) == null) return null; // This may not be an import statement.
+    try self.pushSpan();
+    const source_path = try self.expect(.STRING_LITERAL);
+    const source_path_node = try self.tree.addNode(.{
+        .span = source_path.span,
+        .kind = .{ .string_literal = source_path.literal.string },
+    });
+    if (try self.maybe(.KW_AS) != null) {
+        const import_rename_node = try self.expectIdentifier();
+        return try self.tree.addNode(.{
+            .span = self.popSpan(),
+            .kind = .{ .import = .{
+                .source = source_path_node,
+                .opt_rename = import_rename_node,
+            } },
+        });
+    } else return try self.tree.addNode(.{
+        .span = self.popSpan(),
+        .kind = .{ .import = .{
+            .source = source_path_node,
+        } },
+    });
+}
+
+test "parseWholeSource method should parse multiple statements" {
+    // TODO: Add semicolons after implementing them in lexer.
+    const source =
+        \\import "source.brr"
+        \\import "another.brr" as another
+    ;
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const module = try parser.parseWholeSource();
+    const module_node = parser.tree.getNodeUnsafe(module);
+    try std.testing.expectEqualDeep(common.Span{ .start = 0, .end = 51 }, module_node.span);
+    try std.testing.expectEqualDeep("module", @tagName(module_node.kind));
+    try std.testing.expectEqual(2, module_node.kind.module.statements.len);
+}
+
+test "Parse `import` statement" {
+    // There are no semicolons because this only tests one sub-parser.
+    const source =
+        \\import "source.brr"
+        \\import "another.brr" as another
+    ;
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const import_1 = (try parser.parseMaybeImportStatement()).?;
+    const import_1_node = parser.tree.getNodeUnsafe(import_1);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 19 },
+        .kind = .{ .import = .{
+            .source = 0,
+            .opt_rename = null,
+        } },
+    }, import_1_node);
+
+    const import_2 = (try parser.parseMaybeImportStatement()).?;
+    const import_2_node = parser.tree.getNodeUnsafe(import_2);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 20, .end = 51 },
+        .kind = .{ .import = .{
+            .source = 2,
+            .opt_rename = 3,
+        } },
+    }, import_2_node);
+}
