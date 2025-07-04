@@ -7,9 +7,6 @@ const reportz = @import("reportz");
 
 const common = @import("common.zig");
 
-// This is unfortunately required for parsing string literals,
-// as we may need to replace escape sequences.
-allocator: std.mem.Allocator,
 // Start index of the current token.
 // This is used for generation of proper spans.
 start: usize = 0,
@@ -153,7 +150,8 @@ pub inline fn isAtEnd(self: *Self) bool {
 
 // Generate next token. This function neither allocates nor stores the token.
 // Peeking functionality is implemented in the parser.
-pub fn next(self: *Self) Self.Error!Token {
+// We wanted to avoid using allocator here, but string literals require it.
+pub fn next(self: *Self, allocator: std.mem.Allocator) Self.Error!Token {
     const eof = Token{
         .type = .EOF,
         // EOF span has no length. It starts and ends at the end of source code.
@@ -181,7 +179,7 @@ pub fn next(self: *Self) Self.Error!Token {
         'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
         '0'...'9' => try self.lexNumber(&literal_value),
         '\'' => try self.lexCharacter(&literal_value),
-        '"' => try self.lexString(&literal_value),
+        '"' => try self.lexString(allocator, &literal_value),
         else => return error.InvalidToken,
     };
 
@@ -357,12 +355,12 @@ fn lexCharacter(self: *Self, literal_value: *LiteralValue) Self.Error!TokenType 
 }
 
 // Lex string literal. Character literals are everything delimited by `"` characters.
-fn lexString(self: *Self, literal_value: *LiteralValue) Self.Error!TokenType {
+fn lexString(self: *Self, allocator: std.mem.Allocator, literal_value: *LiteralValue) Self.Error!TokenType {
     self.current += 1; // This is only called after `"` is detected.
     if (self.isAtEnd())
         return self.reportError("L13", "Unterminated string literal", error.UnterminatedStringLiteral);
 
-    var string_value = std.ArrayList(u8).init(self.allocator);
+    var string_value = std.ArrayList(u8).init(allocator);
     // This function may fail early, in such case we should deinit to avoid leaks.
     errdefer string_value.deinit();
 
@@ -464,10 +462,8 @@ fn skipWhitespace(self: *Self) bool {
 
 test "Lex single character tokens" {
     const source = "(){}[]";
-    var lexer = Self{
-        .allocator = std.testing.allocator,
-        .source = source,
-    };
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
 
     for ([_]TokenType{
         .LEFT_PAREN,
@@ -482,91 +478,87 @@ test "Lex single character tokens" {
             .span = .{ .start = idx, .end = idx + 1 },
             .lexeme = source[idx .. idx + 1],
         };
-        try std.testing.expectEqualDeep(expected_token, try lexer.next());
+        try std.testing.expectEqualDeep(expected_token, try lexer.next(alloc));
     }
 }
 
 test "Lex keywords and identifiers" {
     const source = "simple with_underscore import";
-    var lexer = Self{
-        .allocator = std.testing.allocator,
-        .source = source,
-    };
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
 
     try std.testing.expectEqualDeep(Token{
         .type = .IDENTIFIER,
         .span = .{ .start = 0, .end = 6 },
         .lexeme = "simple",
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .IDENTIFIER,
         .span = .{ .start = 7, .end = 22 },
         .lexeme = "with_underscore",
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .KW_IMPORT,
         .span = .{ .start = 23, .end = 29 },
         .lexeme = "import",
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 }
 
 test "Lex numbers" {
     const source = "123 4_567_890 42.321 0b1010 0o67 0x1F4 0";
-    var lexer = Self{
-        .allocator = std.testing.allocator,
-        .source = source,
-    };
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 0, .end = 3 },
         .lexeme = "123",
         .literal = .{ .integer = 123 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 4, .end = 13 },
         .lexeme = "4_567_890",
         .literal = .{ .integer = 4567890 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .FLOAT_LITERAL,
         .span = .{ .start = 14, .end = 20 },
         .lexeme = "42.321",
         .literal = .{ .float = 42.321 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 21, .end = 27 },
         .lexeme = "0b1010",
         .literal = .{ .integer = 10 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 28, .end = 32 },
         .lexeme = "0o67",
         .literal = .{ .integer = 55 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 33, .end = 38 },
         .lexeme = "0x1F4",
         .literal = .{ .integer = 500 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 
     try std.testing.expectEqualDeep(Token{
         .type = .INTEGER_LITERAL,
         .span = .{ .start = 39, .end = 40 },
         .lexeme = "0",
         .literal = .{ .integer = 0 },
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 }
 
 test "Lex character and string literals" {
@@ -575,10 +567,7 @@ test "Lex character and string literals" {
         \\ "Hello" "Hello world" "Lorem\nIpsum"
     ;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    var lexer = Self{
-        .allocator = arena.allocator(),
-        .source = source,
-    };
+    var lexer = Self{ .source = source };
     defer arena.deinit();
 
     try std.testing.expectEqualDeep(Token{
@@ -586,35 +575,35 @@ test "Lex character and string literals" {
         .span = .{ .start = 1, .end = 4 },
         .lexeme = "'a'",
         .literal = .{ .char = 'a' },
-    }, try lexer.next());
+    }, try lexer.next(arena.allocator()));
 
     try std.testing.expectEqualDeep(Token{
         .type = .CHAR_LITERAL,
         .span = .{ .start = 5, .end = 9 },
         .lexeme = "'\\n'",
         .literal = .{ .char = '\n' },
-    }, try lexer.next());
+    }, try lexer.next(arena.allocator()));
 
     try std.testing.expectEqualDeep(Token{
         .type = .STRING_LITERAL,
         .span = .{ .start = 11, .end = 18 },
         .lexeme = "\"Hello\"",
         .literal = .{ .string = "Hello" },
-    }, try lexer.next());
+    }, try lexer.next(arena.allocator()));
 
     try std.testing.expectEqualDeep(Token{
         .type = .STRING_LITERAL,
         .span = .{ .start = 19, .end = 32 },
         .lexeme = "\"Hello world\"",
         .literal = .{ .string = "Hello world" },
-    }, try lexer.next());
+    }, try lexer.next(arena.allocator()));
 
     try std.testing.expectEqualDeep(Token{
         .type = .STRING_LITERAL,
         .span = .{ .start = 33, .end = 47 },
         .lexeme = "\"Lorem\\nIpsum\"",
         .literal = .{ .string = "Lorem\nIpsum" },
-    }, try lexer.next());
+    }, try lexer.next(arena.allocator()));
 }
 
 test "Lex comments and whitespace characters" {
@@ -626,14 +615,12 @@ test "Lex comments and whitespace characters" {
         \\ /* I am multiline
         \\ comment */
     ;
-    var lexer = Self{
-        .allocator = std.testing.allocator,
-        .source = source,
-    };
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
 
     try std.testing.expectEqualDeep(Token{
         .type = .EOF,
         .span = .{ .start = source.len, .end = source.len },
         .lexeme = "",
-    }, try lexer.next());
+    }, try lexer.next(alloc));
 }

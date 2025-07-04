@@ -68,7 +68,7 @@ fn cloneInner(comptime T: type, value: T, allocator: std.mem.Allocator) !T {
     const info = @typeInfo(T);
 
     return switch (info) {
-        .Struct => blk: {
+        .@"struct" => blk: {
             var result: T = undefined;
 
             inline for (std.meta.fields(T)) |field| {
@@ -80,15 +80,15 @@ fn cloneInner(comptime T: type, value: T, allocator: std.mem.Allocator) !T {
             break :blk result;
         },
 
-        .Pointer => |ptr_info| switch (ptr_info.size) {
-            .Slice => blk: {
+        .pointer => |ptr_info| switch (ptr_info.size) {
+            .slice => blk: {
                 const len = value.len;
                 const buf = try allocator.alloc(ptr_info.child, len);
-                std.mem.copy(ptr_info.child, buf, value);
+                @memcpy(buf, value);
                 break :blk buf;
             },
 
-            .One => blk: {
+            .one => blk: {
                 const ptr = try allocator.create(ptr_info.child);
                 ptr.* = try cloneInner(ptr_info.child, value.*, allocator);
                 break :blk ptr;
@@ -97,7 +97,7 @@ fn cloneInner(comptime T: type, value: T, allocator: std.mem.Allocator) !T {
             else => return error.UnsupportedPointerType,
         },
 
-        .Array => blk: {
+        .array => blk: {
             var arr: T = undefined;
             for (value, 0..) |elem, i| {
                 arr[i] = try cloneInner(@TypeOf(elem), elem, allocator);

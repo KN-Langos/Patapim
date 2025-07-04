@@ -34,7 +34,7 @@ pub const NodeId = usize;
 // `import "source.brr" as source;`
 pub const Import = struct {
     source: NodeId,
-    opt_rename: ?NodeId,
+    opt_rename: ?NodeId = null,
 };
 
 // ---< AST Nodes end >---
