@@ -80,6 +80,48 @@ pub const TokenType = enum {
     LEFT_SQUARE, // '['
     RIGHT_SQUARE, // ']'
 
+    //Boolean operators
+    EQ_EQ, // '=='
+    NOT_EQ, // '!='
+    LESS_THAN, // '<'
+    GREATER_THAN, // '>'
+    LESS_EQUAL, // '<='
+    GREATER_EQUAL, // '>='
+
+    //Logical and Bitwise Operators
+    BANG, // '!'     ( kto to tak nazywa XD?)
+    BITWISE_OR, // '|'
+    BITWISE_AND, // '&'
+    BITWISE_XOR, // '^'
+    LOGICAL_AND, // 'and' || '&&'
+    LOGICAL_OR, // 'or' || '||'
+    BTISHIFT_LEFT, // '<<'
+    BITSHIFT_RIGHT, // '>>'
+
+    //Assignment variants (bitwise operators)
+    BITWISE_OR_ASSIGN, //'|='
+    BITWISE_AND_ASSIGN, // '&='
+    BITWISE_XOR_ASSIGN, // '^='
+    ASSIGN, // '='   // nwm gdzie to wjebac tbh
+
+    //Math operators
+    ADD, // '+'
+    SUBTRACT, // '-'
+    DIVIDE, // '/'
+    MULTIPLY, // '*'
+    MODULO, // '%'
+
+    //Assigment variants ( math )
+    ADD_ASSIGN, // '+='
+    SUB_ASSIGN, // '-='
+    MUL_ASSIGN, // '*='
+    DIV_ASSIGN, // '/='
+    MOD_ASSIGN, // '%='
+    INCREMENT, // '++'
+    DECREMENT, // '--'
+
+    //Special Symbols ( to do )
+
     // Keywords:
     KW_IMPORT,
     KW_AS,
@@ -166,7 +208,7 @@ pub fn next(self: *Self) Self.Error!Token {
         '}' => .RIGHT_CURLY,
         '[' => .LEFT_SQUARE,
         ']' => .RIGHT_SQUARE,
-
+        '!', '*', '+', '-', '<'...'>', '/', '^', '&', '%', '|' => self.lexOperators(),
         'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
         '0'...'9' => try self.lexNumber(&literal_value),
         else => return error.InvalidToken,
@@ -189,6 +231,110 @@ pub fn next(self: *Self) Self.Error!Token {
         result_token.literal,
     });
     return result_token;
+}
+
+fn lexOperators(self: *Self) TokenType {
+    const char1: u8 = self.source[self.current];
+    self.current += 1;
+    var char2: u8 = 0;
+    if (!self.isAtEnd()) {
+        char2 = self.source[self.current];
+    }
+
+    switch (char1) {
+        '<' => switch (char2) {
+            '=' => return .LESS_EQUAL,
+            '<' => return .BTISHIFT_LEFT,
+            else => {
+                self.current -= 1;
+                return .LESS_THAN;
+            },
+        },
+        '>' => switch (char2) {
+            '=' => return .GREATER_EQUAL,
+            '>' => return .BITSHIFT_RIGHT,
+            else => {
+                self.current -= 1;
+                return .GREATER_THAN;
+            },
+        },
+
+        '!' => switch (char2) {
+            '=' => return .NOT_EQ,
+            else => {
+                self.current -= 1;
+                return .BANG;
+            },
+        },
+        '=' => switch (char2) {
+            '=' => return .EQ_EQ,
+            else => {
+                self.current -= 1;
+                return .ASSIGN;
+            },
+        },
+        '|' => switch (char2) {
+            '=' => return .BITWISE_OR_ASSIGN,
+            '|' => return .LOGICAL_OR,
+            else => {
+                self.current -= 1;
+                return .BITWISE_OR;
+            },
+        },
+        '&' => switch (char2) {
+            '=' => return .BITWISE_AND_ASSIGN,
+            '&' => return .LOGICAL_AND,
+            else => {
+                self.current -= 1;
+                return .BITWISE_AND;
+            },
+        },
+        '^' => switch (char2) {
+            '=' => return .BITWISE_XOR_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .BITWISE_XOR;
+            },
+        },
+        '+' => switch (char2) {
+            '=' => return .ADD_ASSIGN,
+            '+' => return .INCREMENT,
+            else => {
+                self.current -= 1;
+                return .ADD;
+            },
+        },
+        '-' => switch (char2) {
+            '=' => return .SUB_ASSIGN,
+            '-' => return .DECREMENT,
+            else => {
+                self.current -= 1;
+                return .SUBTRACT;
+            },
+        },
+        '*' => switch (char2) {
+            '=' => return .MUL_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .SUBTRACT;
+            },
+        },
+        '/' => switch (char2) {
+            '=' => return .DIV_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .DIVIDE;
+            },
+        },
+        '%' => switch (char2) {
+            '=' => return .MOD_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .MODULO;
+            },
+        },
+        else => return .EOF,
+    }
 }
 
 // Lex any identifier or keyword.
@@ -492,5 +638,76 @@ test "Lex comments and whitespace characters" {
         .type = .EOF,
         .span = .{ .start = source.len, .end = source.len },
         .lexeme = "",
+    }, try lexer.next());
+}
+
+test "Lex operators" {
+    const source = "== > <= != << + ++ -- || ^ =";
+    var lexer = Self{ .source = source };
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .EQ_EQ,
+        .span = .{ .start = 0, .end = 2 },
+        .lexeme = "==",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .GREATER_THAN,
+        .span = .{ .start = 3, .end = 4 },
+        .lexeme = ">",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .LESS_EQUAL,
+        .span = .{ .start = 5, .end = 7 },
+        .lexeme = "<=",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .NOT_EQ,
+        .span = .{ .start = 8, .end = 10 },
+        .lexeme = "!=",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .BTISHIFT_LEFT,
+        .span = .{ .start = 11, .end = 13 },
+        .lexeme = "<<",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .ADD,
+        .span = .{ .start = 14, .end = 15 },
+        .lexeme = "+",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INCREMENT,
+        .span = .{ .start = 16, .end = 18 },
+        .lexeme = "++",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .DECREMENT,
+        .span = .{ .start = 19, .end = 21 },
+        .lexeme = "--",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .LOGICAL_OR,
+        .span = .{ .start = 22, .end = 24 },
+        .lexeme = "||",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .BITWISE_XOR,
+        .span = .{ .start = 25, .end = 26 },
+        .lexeme = "^",
+    }, try lexer.next());
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .ASSIGN,
+        .span = .{ .start = 27, .end = 28 },
+        .lexeme = "=",
     }, try lexer.next());
 }
