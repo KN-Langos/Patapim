@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const reportz = @import("reportz");
+
 // Span stores indices of where given token or node starts and ends.
 pub const Span = struct {
     start: usize,
@@ -9,6 +11,10 @@ pub const Span = struct {
 
     pub fn len(span: Self) usize {
         return span.end - span.start;
+    }
+
+    pub inline fn asReportz(self: Self) reportz.reports.Span {
+        return .{ .start = self.start, .end = self.end };
     }
 };
 

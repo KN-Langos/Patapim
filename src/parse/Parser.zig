@@ -31,6 +31,7 @@ const LOG = std.log.scoped(.parser);
 
 pub const Error = error{
     UnexpectedToken,
+    ExpectedStatement,
 } || Lexer.Error || std.mem.Allocator.Error;
 
 pub fn init(alloc: std.mem.Allocator, lexer: *Lexer) Self {
@@ -154,10 +155,25 @@ fn pushSpan(self: *Self) std.mem.Allocator.Error!void {
     try self.span_stack.append(self.last_token.?.span.start);
 }
 
+// Push new span beginning to the stack.
+// Opposed to `pushSpan` method, this one uses next token
+// instead of last token.
+fn pushSpanOnNextToken(self: *Self) Self.Error!void {
+    const next_token = try self.peek();
+    try self.span_stack.append(next_token.span.start);
+}
+
 // Get current span from the stack.
 // This function assumes that stack is not empty.
 fn popSpan(self: *Self) common.Span {
     const span_start = self.span_stack.pop().?;
+    const span_end = self.last_token.?.span.end;
+    return .{ .start = span_start, .end = span_end };
+}
+
+// Get current span from the stack without popping it.
+fn peekSpan(self: *Self) common.Span {
+    const span_start = self.span_stack.getLast();
     const span_end = self.last_token.?.span.end;
     return .{ .start = span_start, .end = span_end };
 }
@@ -171,6 +187,54 @@ fn expectIdentifier(self: *Self) !usize {
 }
 
 // ---< Helper and utility functions end >---
+
+// Parse whole source returning main "module" node.
+pub fn parseWholeSource(self: *Self) !usize {
+    var module_statements = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer module_statements.deinit(); // This function may fail early.
+
+    try self.pushSpanOnNextToken();
+    defer _ = self.popSpan(); // We do not need to keep this span on stack after error.
+
+    while (!self.lexer.isAtEnd()) {
+        const stmt = try self.parseAnyStatement();
+        try module_statements.append(stmt);
+        // TODO: Add this back after special tokens are added to the lexer.
+        // self.expect(.SEMICOLON);
+    }
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .module = .{
+            .statements = try module_statements.toOwnedSlice(),
+        } },
+    });
+}
+
+// Parse any statement and return its ID.
+// This function fails if no statement is possible to parse,
+// so ensure there is no EOF before calling this.
+pub fn parseAnyStatement(self: *Self) !usize {
+    try self.pushSpanOnNextToken();
+    defer _ = self.popSpan(); // We need span only in case of an error.
+
+    if (try self.parseMaybeImportStatement()) |stmt| return stmt;
+
+    // If nothing has returned up to this point, we assume that there
+    // is no statement where it should be and panic.
+    return self.reportError(
+        "P002",
+        "Expected statement, but found something else.",
+        .{},
+        error.ExpectedStatement,
+        .{
+            .labels = &.{.{
+                .color = .{ .basic = .magenta },
+                .span = self.peekSpan().asReportz(),
+                .message = "Found this instead.",
+            }},
+        },
+    );
+}
 
 // Parse import statement and return its ID if parsed.
 // For more information please reference `ast.zig -> Import` struct.
@@ -197,6 +261,23 @@ pub fn parseMaybeImportStatement(self: *Self) !?usize {
             .source = source_path_node,
         } },
     });
+}
+
+test "parseWholeSource method should parse multiple statements" {
+    // TODO: Add semicolons after implementing them in lexer.
+    const source =
+        \\import "source.brr"
+        \\import "another.brr" as another
+    ;
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const module = try parser.parseWholeSource();
+    const module_node = parser.tree.getNodeUnsafe(module);
+    try std.testing.expectEqualDeep(common.Span{ .start = 0, .end = 51 }, module_node.span);
+    try std.testing.expectEqualDeep("module", @tagName(module_node.kind));
+    try std.testing.expectEqual(2, module_node.kind.module.statements.len);
 }
 
 test "Parse `import` statement" {
