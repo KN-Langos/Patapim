@@ -142,3 +142,10 @@ fn maybe(self: *Self, maybe_type: TokenType) Self.Error!?Token {
 }
 
 // ---< Helper and utility functions end >---
+
+// Parse import statement and return its ID if parsed.
+// For more information please reference `ast.zig -> Import` struct.
+pub fn parseMaybeImportStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_IMPORT) == null) return; // This may not be an import statement.
+    // TODO: Parse import statements once string literals are implemented
+}
