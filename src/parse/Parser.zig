@@ -202,11 +202,14 @@ pub fn parseWholeSource(self: *Self) !usize {
         // TODO: Add this back after special tokens are added to the lexer.
         // self.expect(.SEMICOLON);
     }
+
+    const body = try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .code_block = try module_statements.toOwnedSlice() },
+    });
     return try self.tree.addNode(.{
         .span = self.peekSpan(),
-        .kind = .{ .module = .{
-            .statements = try module_statements.toOwnedSlice(),
-        } },
+        .kind = .{ .module = .{ .body = body } },
     });
 }
 
@@ -277,7 +280,8 @@ test "parseWholeSource method should parse multiple statements" {
     const module_node = parser.tree.getNodeUnsafe(module);
     try std.testing.expectEqualDeep(common.Span{ .start = 0, .end = 51 }, module_node.span);
     try std.testing.expectEqualDeep("module", @tagName(module_node.kind));
-    try std.testing.expectEqual(2, module_node.kind.module.statements.len);
+    const body_node = parser.tree.getNodeUnsafe(module_node.kind.module.body);
+    try std.testing.expectEqual(2, body_node.kind.code_block.len);
 }
 
 test "Parse `import` statement" {

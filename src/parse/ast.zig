@@ -18,12 +18,15 @@ pub const NodeKind = union(enum) {
     identifier: []const u8,
     // This is a standard string literal. Template literals will be separate.
     string_literal: []const u8,
+    parameters: []const Parameter,
+    code_block: []const NodeId,
 
     // ---< Special nodes >---
     module: Module,
 
     // ---< Statement nodes >---
     import: Import,
+    function_def: FunctionDef,
 
     // ---< Expression nodes >---
 };
@@ -38,7 +41,7 @@ pub const NodeId = usize;
 // no corresponding langauge syntax. This is just a wrapper
 // to provide one ID with whole top-level code.
 pub const Module = struct {
-    statements: []const usize,
+    body: NodeId,
 };
 
 // Import statement. This is equivalent to one of the examples below:
@@ -49,4 +52,19 @@ pub const Import = struct {
     opt_rename: ?NodeId = null,
 };
 
+// Function definition. This is equivalent to the following code:
+// `fn name(arg1, arg2) { ... }`
+// Native functions are defined by NativeFunctionDecl.
+pub const FunctionDef = struct {
+    name: NodeId,
+    parameters: NodeId,
+    body: NodeId,
+};
+
+// Function parameter, this is currently only identifier.
+// But for purposes of extensibility (and future-proofing attributes),
+// this is what function definitions hold.
+pub const Parameter = struct {
+    name: NodeId,
+};
 // ---< AST Nodes end >---
