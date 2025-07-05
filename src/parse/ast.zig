@@ -19,6 +19,7 @@ pub const NodeKind = union(enum) {
     // This is a standard string literal. Template literals will be separate.
     string_literal: []const u8,
     parameter: Parameter,
+    native_parameter: NativeParameter,
     code_block: []const NodeId,
 
     // ---< Special nodes >---
@@ -27,6 +28,7 @@ pub const NodeKind = union(enum) {
     // ---< Statement nodes >---
     import: Import,
     function_def: FunctionDef,
+    native_function_decl: NativeFunctionDecl,
 
     // ---< Expression nodes >---
 };
@@ -66,5 +68,22 @@ pub const FunctionDef = struct {
 // this is what function definitions hold.
 pub const Parameter = struct {
     name: NodeId,
+};
+
+// Native function declaration. This is equivalent to the following code:
+// `native "C" fn name(arg1, arg2: i32);`
+pub const NativeFunctionDecl = struct {
+    abi: ?NodeId,
+    name: NodeId,
+    parameters: []const NodeId,
+};
+
+// Parameter for native function. This is different from standard parameter
+// because it also can contain native type name.
+// If no type is provided this is equivalent to passing interpreters value pointer
+// and assuming this function is made specifically for Patapim language.
+pub const NativeParameter = struct {
+    name: NodeId,
+    type: ?NodeId,
 };
 // ---< AST Nodes end >---

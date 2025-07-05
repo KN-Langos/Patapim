@@ -220,6 +220,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
 
     if (try self.parseMaybeImportStatement()) |stmt| return stmt;
     if (try self.parseMaybeFunctionDefStatement()) |stmt| return stmt;
+    if (try self.parseMaybeNativeFunctionDeclStatement()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -286,8 +287,11 @@ pub fn parseMaybeFunctionDefStatement(self: *Self) !?usize {
         // This may be moved to a separate function,
         // but I do not see any other place parameters are used.
         const param_name = try self.expectIdentifier();
+        try self.pushSpan();
+        defer _ = self.popSpan();
+
         const param = try self.tree.addNode(.{
-            .span = self.tree.getNodeUnsafe(param_name).span, // This exists for sure.
+            .span = self.peekSpan(),
             .kind = .{ .parameter = .{
                 .name = param_name,
             } },
@@ -309,6 +313,66 @@ pub fn parseMaybeFunctionDefStatement(self: *Self) !?usize {
             .name = fn_name,
             .parameters = try fn_parameters.toOwnedSlice(),
             .body = body,
+        } },
+    });
+}
+
+// Parse native function declaration statement and return its ID if parsed.
+// For more information please reference `ast.zig -> NativeFunctionDecl` struct.
+pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_NATIVE) == null) return null; // This may not be a native decl.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    // ABI part of native function declaration is optional.
+    const abi_maybe = try self.maybe(.STRING_LITERAL);
+    const abi_node = if (abi_maybe) |abi| try self.tree.addNode(.{
+        .span = abi.span,
+        .kind = .{ .string_literal = abi.literal.string },
+    }) else null;
+
+    _ = try self.expect(.KW_FUNCTION);
+
+    // This is very similar to the code in parseMaybeFunctionDefStatement.
+    const fn_name = try self.expectIdentifier();
+    _ = try self.expect(.LEFT_PAREN);
+
+    var fn_parameters = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer fn_parameters.deinit(); // This may fail early.
+
+    while (try self.maybe(.RIGHT_PAREN) == null) {
+        const param_name = try self.expectIdentifier();
+        try self.pushSpan();
+        defer _ = self.popSpan();
+
+        // Types are optional.
+        var type_node: ?ast.NodeId = null;
+        if (try self.maybe(.COLON) != null)
+            type_node = try self.expectIdentifier();
+
+        const param = try self.tree.addNode(.{
+            .span = self.peekSpan(),
+            .kind = .{ .native_parameter = .{
+                .name = param_name,
+                .type = type_node,
+            } },
+        });
+
+        try fn_parameters.append(param);
+
+        if (try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_PAREN); // If we break we need to check this.
+            break;
+        }
+    }
+    _ = try self.expect(.SEMICOLON);
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .native_function_decl = .{
+            .abi = abi_node,
+            .name = fn_name,
+            .parameters = try fn_parameters.toOwnedSlice(),
         } },
     });
 }
@@ -380,9 +444,7 @@ test "Parse `import` statement" {
 }
 
 test "Parse function definition statement" {
-    const source =
-        \\fn lorem(hello, world) {}
-    ;
+    const source = "fn lorem(hello, world) {}";
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
@@ -395,6 +457,24 @@ test "Parse function definition statement" {
             .name = 0,
             .parameters = &.{ 2, 4 },
             .body = 5,
+        } },
+    }, fn_node);
+}
+
+test "Parse native function declaration statement" {
+    const source = "native \"C\" fn lorem(hello: i32, world);";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const fn_id = (try parser.parseMaybeNativeFunctionDeclStatement()).?;
+    const fn_node = parser.tree.getNodeUnsafe(fn_id);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 39 },
+        .kind = .{ .native_function_decl = .{
+            .abi = 0,
+            .name = 1,
+            .parameters = &.{ 4, 6 },
         } },
     }, fn_node);
 }
