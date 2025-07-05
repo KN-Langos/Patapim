@@ -51,7 +51,7 @@ pub fn Tree(comptime Node: type) type {
         }
 
         // Gets node from the tree. If node does not exists this returns null.
-        pub fn getNode(self: *Self, id: usize) ?Node {
+        pub fn getNode(self: *const Self, id: usize) ?Node {
             if (self.nodes.items.len > id)
                 return self.nodes.items[id];
             return null;
@@ -59,7 +59,7 @@ pub fn Tree(comptime Node: type) type {
 
         // Gets node from the tree with an assumption that it exists.
         // Avoid calling this, as it may cause segmentation faults.
-        pub inline fn getNodeUnsafe(self: *Self, id: usize) Node {
+        pub inline fn getNodeUnsafe(self: *const Self, id: usize) Node {
             return self.nodes.items[id];
         }
     };
