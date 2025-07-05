@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const common = @import("../common.zig");
+pub const PrettyPrinter = @import("../utility/AstPrettyPrinter.zig");
 
 // Type alias for AST Tree.
 pub const Tree = common.Tree(Node);
