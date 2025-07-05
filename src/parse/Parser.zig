@@ -199,8 +199,6 @@ pub fn parseWholeSource(self: *Self) !usize {
     while (!self.lexer.isAtEnd()) {
         const stmt = try self.parseAnyStatement();
         try module_statements.append(stmt);
-        // TODO: Add this back after special tokens are added to the lexer.
-        // self.expect(.SEMICOLON);
     }
 
     const body = try self.tree.addNode(.{
@@ -216,11 +214,12 @@ pub fn parseWholeSource(self: *Self) !usize {
 // Parse any statement and return its ID.
 // This function fails if no statement is possible to parse,
 // so ensure there is no EOF before calling this.
-pub fn parseAnyStatement(self: *Self) !usize {
+pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     try self.pushSpanOnNextToken();
     defer _ = self.popSpan(); // We need span only in case of an error.
 
     if (try self.parseMaybeImportStatement()) |stmt| return stmt;
+    if (try self.parseMaybeFunctionDefStatement()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -244,6 +243,7 @@ pub fn parseAnyStatement(self: *Self) !usize {
 pub fn parseMaybeImportStatement(self: *Self) !?usize {
     if (try self.maybe(.KW_IMPORT) == null) return null; // This may not be an import statement.
     try self.pushSpan();
+    defer _ = self.popSpan();
     const source_path = try self.expect(.STRING_LITERAL);
     const source_path_node = try self.tree.addNode(.{
         .span = source_path.span,
@@ -251,26 +251,91 @@ pub fn parseMaybeImportStatement(self: *Self) !?usize {
     });
     if (try self.maybe(.KW_AS) != null) {
         const import_rename_node = try self.expectIdentifier();
+        _ = try self.expect(.SEMICOLON);
         return try self.tree.addNode(.{
-            .span = self.popSpan(),
+            .span = self.peekSpan(),
             .kind = .{ .import = .{
                 .source = source_path_node,
                 .opt_rename = import_rename_node,
             } },
         });
-    } else return try self.tree.addNode(.{
-        .span = self.popSpan(),
-        .kind = .{ .import = .{
-            .source = source_path_node,
+    } else {
+        _ = try self.expect(.SEMICOLON);
+        return try self.tree.addNode(.{
+            .span = self.peekSpan(),
+            .kind = .{ .import = .{
+                .source = source_path_node,
+            } },
+        });
+    }
+}
+
+// Parse function definition statement and return its ID if parsed.
+// For more information please reference `ast.zig -> FunctionDef` struct.
+pub fn parseMaybeFunctionDefStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_FUNCTION) == null) return null; // This may not be a fn statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const fn_name = try self.expectIdentifier();
+    _ = try self.expect(.LEFT_PAREN);
+
+    var fn_parameters = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer fn_parameters.deinit(); // This may fail early.
+
+    while (try self.maybe(.RIGHT_PAREN) == null) {
+        // This may be moved to a separate function,
+        // but I do not see any other place parameters are used.
+        const param_name = try self.expectIdentifier();
+        const param = try self.tree.addNode(.{
+            .span = self.tree.getNodeUnsafe(param_name).span, // This exists for sure.
+            .kind = .{ .parameter = .{
+                .name = param_name,
+            } },
+        });
+
+        try fn_parameters.append(param);
+
+        if (try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_PAREN); // If we break we need to check this.
+            break;
+        }
+    }
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .function_def = .{
+            .name = fn_name,
+            .parameters = try fn_parameters.toOwnedSlice(),
+            .body = body,
         } },
     });
 }
 
+// Parse block of code.
+// This is basically a statement list inside of `{}` parentheses.
+// This function assumes that caller has checked for `{` character already.
+pub fn parseCodeBlock(self: *Self) !usize {
+    _ = try self.expect(.LEFT_CURLY);
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    var block_contents = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer block_contents.deinit();
+    while (try self.maybe(.RIGHT_CURLY) == null) {
+        const stmt = try self.parseAnyStatement();
+        try block_contents.append(stmt);
+    }
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .code_block = try block_contents.toOwnedSlice() },
+    });
+}
+
 test "parseWholeSource method should parse multiple statements" {
-    // TODO: Add semicolons after implementing them in lexer.
     const source =
-        \\import "source.brr"
-        \\import "another.brr" as another
+        \\import "source.brr";
+        \\import "another.brr" as another;
     ;
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
@@ -278,17 +343,16 @@ test "parseWholeSource method should parse multiple statements" {
 
     const module = try parser.parseWholeSource();
     const module_node = parser.tree.getNodeUnsafe(module);
-    try std.testing.expectEqualDeep(common.Span{ .start = 0, .end = 51 }, module_node.span);
+    try std.testing.expectEqualDeep(common.Span{ .start = 0, .end = 53 }, module_node.span);
     try std.testing.expectEqualDeep("module", @tagName(module_node.kind));
     const body_node = parser.tree.getNodeUnsafe(module_node.kind.module.body);
     try std.testing.expectEqual(2, body_node.kind.code_block.len);
 }
 
 test "Parse `import` statement" {
-    // There are no semicolons because this only tests one sub-parser.
     const source =
-        \\import "source.brr"
-        \\import "another.brr" as another
+        \\import "source.brr";
+        \\import "another.brr" as another;
     ;
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
@@ -297,7 +361,7 @@ test "Parse `import` statement" {
     const import_1 = (try parser.parseMaybeImportStatement()).?;
     const import_1_node = parser.tree.getNodeUnsafe(import_1);
     try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 0, .end = 19 },
+        .span = .{ .start = 0, .end = 20 },
         .kind = .{ .import = .{
             .source = 0,
             .opt_rename = null,
@@ -307,10 +371,44 @@ test "Parse `import` statement" {
     const import_2 = (try parser.parseMaybeImportStatement()).?;
     const import_2_node = parser.tree.getNodeUnsafe(import_2);
     try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 20, .end = 51 },
+        .span = .{ .start = 21, .end = 53 },
         .kind = .{ .import = .{
             .source = 2,
             .opt_rename = 3,
         } },
     }, import_2_node);
+}
+
+test "Parse function definition statement" {
+    const source =
+        \\fn lorem(hello, world) {}
+    ;
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const fn_id = (try parser.parseMaybeFunctionDefStatement()).?;
+    const fn_node = parser.tree.getNodeUnsafe(fn_id);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 25 },
+        .kind = .{ .function_def = .{
+            .name = 0,
+            .parameters = &.{ 2, 4 },
+            .body = 5,
+        } },
+    }, fn_node);
+}
+
+test "Parse code block" {
+    const source = "{import \"hello.brr\";}";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const block = try parser.parseCodeBlock();
+    const block_node = parser.tree.getNodeUnsafe(block);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 21 },
+        .kind = .{ .code_block = &.{1} },
+    }, block_node);
 }

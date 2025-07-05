@@ -18,7 +18,7 @@ pub const NodeKind = union(enum) {
     identifier: []const u8,
     // This is a standard string literal. Template literals will be separate.
     string_literal: []const u8,
-    parameters: []const Parameter,
+    parameter: Parameter,
     code_block: []const NodeId,
 
     // ---< Special nodes >---
@@ -57,7 +57,7 @@ pub const Import = struct {
 // Native functions are defined by NativeFunctionDecl.
 pub const FunctionDef = struct {
     name: NodeId,
-    parameters: NodeId,
+    parameters: []const NodeId,
     body: NodeId,
 };
 
