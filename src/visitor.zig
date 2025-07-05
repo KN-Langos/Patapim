@@ -70,18 +70,18 @@ pub fn Visitee(
         fn walkField(self: @This(), comptime field: anytype, tree: *const Tree, value: anytype) !void {
             switch (@typeInfo(field.type)) {
                 .int => { // This is a pointer to another tree node.
-                    _ = try VisitorType.accept(@ptrCast(self.impl), tree, value);
+                    _ = try VisitorType.accept(@alignCast(@ptrCast(self.impl)), tree, value);
                 },
                 .optional => |_| {
                     if (value) |f| {
-                        _ = try VisitorType.accept(@ptrCast(self.impl), tree, f);
+                        _ = try VisitorType.accept(@alignCast(@ptrCast(self.impl)), tree, f);
                     }
                 },
                 .pointer => |ptr_info| switch (ptr_info.size) {
                     .one => @compileError("All node child element IDs should be passed by value"),
                     .slice => {
                         for (value) |element| {
-                            _ = try VisitorType.accept(@ptrCast(self.impl), tree, element);
+                            _ = try VisitorType.accept(@alignCast(@ptrCast(self.impl)), tree, element);
                         }
                     },
                     else => @compileError("Only single pointers and slices are supported in walkField visitor."),
@@ -98,7 +98,21 @@ pub fn Visitee(
                         try self.walkField(field, tree, value);
                     }
                 },
-                else => {},
+                .pointer => |ptr_info| {
+                    if (ptr_info.child != usize)
+                        return;
+                    switch (ptr_info.size) {
+                        .slice => {
+                            for (self.value) |element| {
+                                _ = try VisitorType.accept(@alignCast(@ptrCast(self.impl)), tree, element);
+                            }
+                        },
+                        else => {},
+                    }
+                },
+                else => {
+                    std.debug.print("Visitor: {any}\n", .{info});
+                },
             }
         }
     };
