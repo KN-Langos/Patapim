@@ -130,6 +130,7 @@ pub const TokenType = enum {
     SEMICOLON, //';'
     COLON, // ':'
     DOT, // '.'
+    COMMA, // ','
     RANGE, // '..'
     SPREAD, // '...'
     ARROW, // '->'
@@ -233,6 +234,7 @@ pub fn next(self: *Self, allocator: std.mem.Allocator) Self.Error!Token {
         '#' => .HASH,
         '?' => .QUESTION,
         '$' => .DOLLAR,
+        ',' => .COMMA,
 
         '.' => self.lexDots(),
 
@@ -789,8 +791,8 @@ test "Lex numbers" {
         .lexeme = "0",
         .literal = .{ .integer = 0 },
     }, try lexer.next(alloc));
-    
-        try std.testing.expectEqualDeep(Token{
+
+    try std.testing.expectEqualDeep(Token{
         .type = .FLOAT_LITERAL,
         .span = .{ .start = 41, .end = 45 },
         .lexeme = "14E4",
