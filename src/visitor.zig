@@ -86,6 +86,7 @@ pub fn Visitee(
                     },
                     else => @compileError("Only single pointers and slices are supported in walkField visitor."),
                 },
+                .@"enum" => {}, // Some nodes like operators may have enum fields.
                 else => @compileError("All node variants should only have NodeIDs, optionals or slices."),
             }
         }
