@@ -30,6 +30,7 @@ pub const NodeKind = union(enum) {
     binary_operator: BinaryOperator,
     unary_operator: UnaryOperator,
     assignment: Assignment,
+    expression_group: ExpressionGroup,
 
     // ---< Special nodes >---
     module: Module,
@@ -117,6 +118,10 @@ pub const Assignment = struct {
     target: NodeId,
     operator: AssignmentOperator,
     value: NodeId, // Expression
+};
+
+pub const ExpressionGroup = struct {
+    expression: NodeId,
 };
 // ---< AST Nodes end >---
 

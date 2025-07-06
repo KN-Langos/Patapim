@@ -57,15 +57,6 @@ pub fn Tree(comptime Node: type) type {
             return null;
         }
 
-        // Replaces node in the tree with a new one.
-        // If node with given ID does not exist, this returns IndexOutOfBounds error.
-        pub fn replaceNode(self: *Self, id: usize, new_node: Node) !void {
-            if (id >= self.nodes.items.len) {
-                return error.NodeNotFound;
-            }
-            self.nodes.items[id] = new_node;
-        }
-
         // Gets node from the tree with an assumption that it exists.
         // Avoid calling this, as it may cause segmentation faults.
         pub inline fn getNodeUnsafe(self: *const Self, id: usize) Node {
