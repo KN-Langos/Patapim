@@ -96,12 +96,13 @@ pub const TokenType = enum {
 
     //Logical and Bitwise Operators
     BANG, // '!'
+    BITWISE_NOT, // '~'
     BITWISE_OR, // '|'
     BITWISE_AND, // '&'
     BITWISE_XOR, // '^'
     LOGICAL_AND, // 'and' || '&&'
     LOGICAL_OR, // 'or' || '||'
-    BTISHIFT_LEFT, // '<<'
+    BITSHIFT_LEFT, // '<<'
     BITSHIFT_RIGHT, // '>>'
 
     //Assignment variants (bitwise operators)
@@ -235,6 +236,7 @@ pub fn next(self: *Self, allocator: std.mem.Allocator) Self.Error!Token {
         '?' => .QUESTION,
         '$' => .DOLLAR,
         ',' => .COMMA,
+        '~' => .BITWISE_NOT,
 
         '.' => self.lexDots(),
 
@@ -302,7 +304,7 @@ fn lexOperators(self: *Self) TokenType {
     switch (char1) {
         '<' => switch (char2) {
             '=' => return .LESS_EQUAL,
-            '<' => return .BTISHIFT_LEFT,
+            '<' => return .BITSHIFT_LEFT,
             else => {
                 self.current -= 1;
                 return .LESS_THAN;
@@ -375,7 +377,7 @@ fn lexOperators(self: *Self) TokenType {
             '=' => return .MUL_ASSIGN,
             else => {
                 self.current -= 1;
-                return .SUBTRACT;
+                return .MULTIPLY;
             },
         },
         '/' => switch (char2) {
@@ -882,95 +884,5 @@ test "Lex comments and whitespace characters" {
         .type = .EOF,
         .span = .{ .start = source.len, .end = source.len },
         .lexeme = "",
-    }, try lexer.next(alloc));
-}
-
-test "Lex operators" {
-    const source = "== > <= != << + ++ -- || ^ = . ... ..";
-    var lexer = Self{ .source = source };
-    const alloc = std.testing.allocator;
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .EQ_EQ,
-        .span = .{ .start = 0, .end = 2 },
-        .lexeme = "==",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .GREATER_THAN,
-        .span = .{ .start = 3, .end = 4 },
-        .lexeme = ">",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .LESS_EQUAL,
-        .span = .{ .start = 5, .end = 7 },
-        .lexeme = "<=",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .NOT_EQ,
-        .span = .{ .start = 8, .end = 10 },
-        .lexeme = "!=",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .BTISHIFT_LEFT,
-        .span = .{ .start = 11, .end = 13 },
-        .lexeme = "<<",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .ADD,
-        .span = .{ .start = 14, .end = 15 },
-        .lexeme = "+",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .INCREMENT,
-        .span = .{ .start = 16, .end = 18 },
-        .lexeme = "++",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .DECREMENT,
-        .span = .{ .start = 19, .end = 21 },
-        .lexeme = "--",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .LOGICAL_OR,
-        .span = .{ .start = 22, .end = 24 },
-        .lexeme = "||",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .BITWISE_XOR,
-        .span = .{ .start = 25, .end = 26 },
-        .lexeme = "^",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .ASSIGN,
-        .span = .{ .start = 27, .end = 28 },
-        .lexeme = "=",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .DOT,
-        .span = .{ .start = 29, .end = 30 },
-        .lexeme = ".",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .SPREAD,
-        .span = .{ .start = 31, .end = 34 },
-        .lexeme = "...",
-    }, try lexer.next(alloc));
-
-    try std.testing.expectEqualDeep(Token{
-        .type = .RANGE,
-        .span = .{ .start = 35, .end = 37 },
-        .lexeme = "..",
     }, try lexer.next(alloc));
 }

@@ -19,9 +19,16 @@ pub const NodeKind = union(enum) {
     identifier: []const u8,
     // This is a standard string literal. Template literals will be separate.
     string_literal: []const u8,
+    integer_literal: u64,
+    float_literal: f64,
+    boolean_literal: bool,
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
+
+    // --< Operator nodes >---
+    binary_operator: BinaryOperator,
+    unary_operator: UnaryOperator,
 
     // ---< Special nodes >---
     module: Module,
@@ -87,4 +94,67 @@ pub const NativeParameter = struct {
     name: NodeId,
     type: ?NodeId,
 };
+
+// Variable reference, this is equivalent to the following code:
+// `variable_name`
+// This is used to reference variables in expressions, statements, etc.
+pub const VariableReference = struct {
+    name: NodeId,
+};
+
+// Binary operator node. This is equivalent to the following code:
+// `left + right`
+pub const BinaryOperator = struct {
+    left: NodeId,
+    operator: Operator,
+    right: NodeId,
+};
+
+// Unary operator node. This is equivalent to the following code:
+// `operator operand`
+pub const UnaryOperator = struct {
+    operator: Operator,
+    operand: NodeId,
+};
 // ---< AST Nodes end >---
+
+// Operators are used in binary and unary operator nodes.
+// They are used to represent the operator itself, and not the whole expression.
+pub const Operator = enum {
+    // Arithmetic operators
+    ADD, // '+'
+    SUBTRACT, // '-'
+    MULTIPLY, // '*'
+    DIVIDE, // '/'
+    MODULO, // '%'
+
+    // Comparison operators
+    EQ_EQ, // '=='
+    NOT_EQ, // '!='
+    LESS_THAN, // '<'
+    LESS_EQUAL, // '<='
+    GREATER_THAN, // '>'
+    GREATER_EQUAL, // '>='
+
+    // Logical operators
+    LOGICAL_AND, // '&&'
+    LOGICAL_OR, // '||'
+
+    // Shift operators
+    BITSHIFT_LEFT, // '<<'
+    BITSHIFT_RIGHT, // '>>'
+
+    // Bitwise operators
+    BITWISE_AND, // '&'
+    BITWISE_OR, // '|'
+    BITWISE_XOR, // '^'
+
+    NOT, // '!'
+    BITWISE_NOT, // '~'
+
+    // Increment/Decrement operators
+    INCREMENT, // '++'
+    DECREMENT, // '--'
+
+    UNKNOWN,
+};
