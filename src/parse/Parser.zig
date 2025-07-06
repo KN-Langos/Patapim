@@ -242,6 +242,8 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     );
 }
 
+//parse variable declaration statement and return its ID if parsed.
+// For more information please reference `ast.zig -> Variable` struct.
 pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
     if (try self.maybe(.KW_VARIABLE) == null) return null;
     try self.pushSpan();
@@ -258,7 +260,8 @@ pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
         } },
     });
 }
-
+// parse constant declaration statement and return its ID if parsed.
+// For more information please reference `ast.zig -> Const` struct.
 pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
     if (try self.maybe(.KW_CONST) == null) return null;
     try self.pushSpan();
@@ -698,6 +701,40 @@ test "Parse function definition statement" {
             .body = 5,
         } },
     }, fn_node);
+}
+
+test "Parse variable declaration statement" {
+    const source = "brr x = 42;";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const var_id = (try parser.parseMaybeVariableDeclaration()).?;
+    const var_node = parser.tree.getNodeUnsafe(var_id);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 10 },
+        .kind = .{ .variable = .{
+            .name = 1,
+            .expression = 3,
+        } },
+    }, var_node);
+}
+
+test "Parse constant declaration statement" {
+    const source = "const X = 42;";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const var_id = (try parser.parseMaybeVariableDeclaration()).?;
+    const var_node = parser.tree.getNodeUnsafe(var_id);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 12 },
+        .kind = .{ .constant = .{
+            .name = 1,
+            .expression = 3,
+        } },
+    }, var_node);
 }
 
 test "Parse native function declaration statement" {
