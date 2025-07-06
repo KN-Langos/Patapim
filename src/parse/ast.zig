@@ -39,7 +39,8 @@ pub const NodeKind = union(enum) {
     import: Import,
     function_def: FunctionDef,
     native_function_decl: NativeFunctionDecl,
-
+    variable: Variable,
+    constant: Const,
     // ---< Expression nodes >---
 };
 
@@ -63,7 +64,19 @@ pub const Import = struct {
     source: NodeId,
     opt_rename: ?NodeId = null,
 };
+// Variable declaration. This is equivalent to the following code:
+// brr [var name] = [expression];
+pub const Variable = struct {
+    name: NodeId,
+    expression: NodeId,
+};
 
+//Const declaration. This is equivalent to the following code:
+//const [name] = [expression];
+pub const Const = struct {
+    name: NodeId,
+    expression: NodeId,
+};
 // Function definition. This is equivalent to the following code:
 // `fn name(arg1, arg2) { ... }`
 // Native functions are defined by NativeFunctionDecl.

@@ -223,7 +223,8 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeImportStatement()) |stmt| return stmt;
     if (try self.parseMaybeFunctionDefStatement()) |stmt| return stmt;
     if (try self.parseMaybeNativeFunctionDeclStatement()) |stmt| return stmt;
-
+    if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
+    if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
     return self.reportError(
@@ -239,6 +240,40 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
             }},
         },
     );
+}
+
+pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
+    if (try self.maybe(.KW_VARIABLE) == null) return null;
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const var_name = try self.expectIdentifier();
+    _ = try self.expect(.ASSIGN);
+    const expression = try self.parseExpression();
+    _ = try self.expect(.SEMICOLON);
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .variable = .{
+            .name = var_name,
+            .expression = expression,
+        } },
+    });
+}
+
+pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
+    if (try self.maybe(.KW_CONST) == null) return null;
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const const_name = try self.expectIdentifier();
+    _ = try self.expect(.ASSIGN);
+    const expression = try self.parseExpression();
+    _ = try self.expect(.SEMICOLON);
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .constant = .{
+            .name = const_name,
+            .expression = expression,
+        } },
+    });
 }
 
 // Parse import statement and return its ID if parsed.
