@@ -712,10 +712,10 @@ test "Parse variable declaration statement" {
     const var_id = (try parser.parseMaybeVariableDeclaration()).?;
     const var_node = parser.tree.getNodeUnsafe(var_id);
     try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 0, .end = 10 },
+        .span = .{ .start = 0, .end = 11 },
         .kind = .{ .variable = .{
-            .name = 1,
-            .expression = 3,
+            .name = 0,
+            .expression = 1,
         } },
     }, var_node);
 }
@@ -726,15 +726,15 @@ test "Parse constant declaration statement" {
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
 
-    const var_id = (try parser.parseMaybeVariableDeclaration()).?;
-    const var_node = parser.tree.getNodeUnsafe(var_id);
+    const const_id = (try parser.parseMaybeConstantDeclaration()).?;
+    const const_node = parser.tree.getNodeUnsafe(const_id);
     try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 0, .end = 12 },
+        .span = .{ .start = 0, .end = 13 },
         .kind = .{ .constant = .{
-            .name = 1,
-            .expression = 3,
+            .name = 0,
+            .expression = 1,
         } },
-    }, var_node);
+    }, const_node);
 }
 
 test "Parse native function declaration statement" {
