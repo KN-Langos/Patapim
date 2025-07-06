@@ -28,6 +28,7 @@ pub const NodeKind = union(enum) {
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
     unary_operator: UnaryOperator,
+    assignment: Assignment,
 
     // ---< Special nodes >---
     module: Module,
@@ -115,6 +116,14 @@ pub const UnaryOperator = struct {
     operator: Operator,
     operand: NodeId,
 };
+
+// This is equivalent to the following code:
+// `variable_name = value`
+pub const Assignment = struct {
+    target: NodeId,
+    operator: AssignmentOperator,
+    value: NodeId, // Expression
+};
 // ---< AST Nodes end >---
 
 // Operators are used in binary and unary operator nodes.
@@ -154,6 +163,22 @@ pub const Operator = enum {
     // Increment/Decrement operators
     INCREMENT, // '++'
     DECREMENT, // '--'
+
+    UNKNOWN,
+};
+
+// Assigment operator.
+// This is used to represent the operator itself, and not the whole expression.
+pub const AssignmentOperator = enum {
+    ASSIGN, // '='
+    ADD_ASSIGN, // '+='
+    SUB_ASSIGN, // '-='
+    MUL_ASSIGN, // '*='
+    DIV_ASSIGN, // '/='
+    MOD_ASSIGN, // '%='
+    BITWISE_AND_ASSIGN, // '&='
+    BITWISE_OR_ASSIGN, // '|='
+    BITWISE_XOR_ASSIGN, // '^='
 
     UNKNOWN,
 };

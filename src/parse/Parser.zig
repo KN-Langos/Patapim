@@ -398,8 +398,12 @@ pub fn parseCodeBlock(self: *Self) !usize {
     });
 }
 
+pub fn parseExpression(self: *Self) !usize {
+    return try self.parseBinaryExpression(0); // 0 precedence means we can parse any expression.
+}
+
 // Parse expression and return its ID if parsed.
-pub fn parseExpression(self: *Self, precedence: u8) !usize {
+pub fn parseBinaryExpression(self: *Self, precedence: u8) !usize {
     var left = try self.parseAtom();
 
     while (true) {
@@ -413,7 +417,9 @@ pub fn parseExpression(self: *Self, precedence: u8) !usize {
         }
 
         _ = try self.expect(next.type);
-        const right = try parseExpression(self, nextPrecedence);
+
+        // Parse the right-hand side of the expression if assignment.
+        const right = try parseBinaryExpression(self, if (nextPrecedence == 1) nextPrecedence - 1 else nextPrecedence);
 
         const left_node = self.tree.getNode(left).?;
         const right_node = self.tree.getNode(right).?;
@@ -423,31 +429,52 @@ pub fn parseExpression(self: *Self, precedence: u8) !usize {
                 .start = left_node.span.start,
                 .end = right_node.span.end,
             },
-            .kind = .{
-                .binary_operator = .{
-                    .left = left,
-                    .operator = switch (next.type) {
-                        .MULTIPLY => .MULTIPLY,
-                        .DIVIDE => .DIVIDE,
-                        .MODULO => .MODULO,
-                        .ADD => .ADD,
-                        .SUBTRACT => .SUBTRACT,
-                        .BITSHIFT_RIGHT => .BITSHIFT_RIGHT,
-                        .BITSHIFT_LEFT => .BITSHIFT_LEFT,
-                        .LESS_THAN => .LESS_THAN,
-                        .LESS_EQUAL => .LESS_EQUAL,
-                        .GREATER_THAN => .GREATER_THAN,
-                        .GREATER_EQUAL => .GREATER_EQUAL,
-                        .EQ_EQ => .EQ_EQ,
-                        .NOT_EQ => .NOT_EQ,
-                        .BITWISE_AND => .BITWISE_AND,
-                        .BITWISE_XOR => .BITWISE_XOR,
-                        .BITWISE_OR => .BITWISE_OR,
-                        .LOGICAL_AND => .LOGICAL_AND,
-                        .LOGICAL_OR => .LOGICAL_OR,
-                        else => unreachable,
+            .kind = switch (nextPrecedence) {
+                // Assignments:
+                1 => .{
+                    .assignment = .{
+                        .operator = switch (next.type) {
+                            .ASSIGN => .ASSIGN,
+                            .ADD_ASSIGN => .ADD_ASSIGN,
+                            .SUB_ASSIGN => .SUB_ASSIGN,
+                            .MUL_ASSIGN => .MUL_ASSIGN,
+                            .DIV_ASSIGN => .DIV_ASSIGN,
+                            .MOD_ASSIGN => .MOD_ASSIGN,
+                            .BITWISE_AND_ASSIGN => .BITWISE_AND_ASSIGN,
+                            .BITWISE_OR_ASSIGN => .BITWISE_OR_ASSIGN,
+                            .BITWISE_XOR_ASSIGN => .BITWISE_XOR_ASSIGN,
+                            else => unreachable,
+                        },
+                        .target = left,
+                        .value = right,
                     },
-                    .right = right,
+                },
+                else => .{
+                    .binary_operator = .{
+                        .left = left,
+                        .operator = switch (next.type) {
+                            .MULTIPLY => .MULTIPLY,
+                            .DIVIDE => .DIVIDE,
+                            .MODULO => .MODULO,
+                            .ADD => .ADD,
+                            .SUBTRACT => .SUBTRACT,
+                            .BITSHIFT_RIGHT => .BITSHIFT_RIGHT,
+                            .BITSHIFT_LEFT => .BITSHIFT_LEFT,
+                            .LESS_THAN => .LESS_THAN,
+                            .LESS_EQUAL => .LESS_EQUAL,
+                            .GREATER_THAN => .GREATER_THAN,
+                            .GREATER_EQUAL => .GREATER_EQUAL,
+                            .EQ_EQ => .EQ_EQ,
+                            .NOT_EQ => .NOT_EQ,
+                            .BITWISE_AND => .BITWISE_AND,
+                            .BITWISE_XOR => .BITWISE_XOR,
+                            .BITWISE_OR => .BITWISE_OR,
+                            .LOGICAL_AND => .LOGICAL_AND,
+                            .LOGICAL_OR => .LOGICAL_OR,
+                            else => unreachable,
+                        },
+                        .right = right,
+                    },
                 },
             },
         });
@@ -545,7 +572,7 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
     try self.pushSpan();
     defer _ = self.popSpan();
 
-    const expr = try self.parseExpression(0); // 0 precedence means we can parse any expression.
+    const expr = try self.parseExpression();
     _ = try self.expect(.RIGHT_PAREN);
 
     const expr_node = self.tree.getNode(expr).?;
@@ -562,16 +589,17 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
 
 pub fn getPrecedence(op: Token) u8 {
     switch (op.type) {
-        .MULTIPLY, .DIVIDE, .MODULO => return 10,
-        .ADD, .SUBTRACT => return 9,
-        .BITSHIFT_RIGHT, .BITSHIFT_LEFT => return 8,
-        .LESS_THAN, .LESS_EQUAL, .GREATER_THAN, .GREATER_EQUAL => return 7,
-        .EQ_EQ, .NOT_EQ => return 6,
-        .BITWISE_AND => return 5,
-        .BITWISE_XOR => return 4,
-        .BITWISE_OR => return 3,
-        .LOGICAL_AND => return 2,
-        .LOGICAL_OR => return 1,
+        .MULTIPLY, .DIVIDE, .MODULO => return 11,
+        .ADD, .SUBTRACT => return 10,
+        .BITSHIFT_RIGHT, .BITSHIFT_LEFT => return 9,
+        .LESS_THAN, .LESS_EQUAL, .GREATER_THAN, .GREATER_EQUAL => return 8,
+        .EQ_EQ, .NOT_EQ => return 7,
+        .BITWISE_AND => return 6,
+        .BITWISE_XOR => return 5,
+        .BITWISE_OR => return 4,
+        .LOGICAL_AND => return 3,
+        .LOGICAL_OR => return 2,
+        .ASSIGN, .ADD_ASSIGN, .SUB_ASSIGN, .MUL_ASSIGN, .DIV_ASSIGN, .MOD_ASSIGN, .BITWISE_AND_ASSIGN, .BITWISE_OR_ASSIGN, .BITWISE_XOR_ASSIGN => return 1,
         else => return 0, // No precedence for other tokens.
     }
 }
@@ -681,7 +709,7 @@ test "Parse broken simple addition expression expecting error" {
 
     try std.testing.expectError(
         error.ExpectedExpressionAtom,
-        parser.parseExpression(0),
+        parser.parseExpression(),
     );
 }
 
@@ -692,7 +720,7 @@ test "Parse simple addition expression" {
     defer parser.deinit(true);
 
     // Parse the expression
-    const expr_id = try parser.parseExpression(0);
+    const expr_id = try parser.parseExpression();
     const expr_node = parser.tree.getNode(expr_id).?;
 
     // Verify root node structure
@@ -729,7 +757,7 @@ test "Parse expression with parentheses" {
     defer parser.deinit(true);
 
     // Parse the expression
-    const expr_id = try parser.parseExpression(0);
+    const expr_id = try parser.parseExpression();
     const expr_node = parser.tree.getNode(expr_id).?;
 
     // Root node: *
@@ -785,7 +813,7 @@ test "Parse complex expression with operators" {
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
 
-    const expr_id = try parser.parseExpression(0);
+    const expr_id = try parser.parseExpression();
     const expr_node = parser.tree.getNode(expr_id).?;
 
     // IDs assigned in order:
@@ -994,4 +1022,61 @@ test "Parse complex expression with operators" {
         .span = .{ .start = 38, .end = 39 },
         .kind = .{ .integer_literal = 3 },
     }, lit3);
+}
+
+test "Parse assignment" {
+    const source = "a += b = 2";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    // Parse the expression
+    const expr_id = try parser.parseExpression();
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: assignment '+='
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 10 },
+        .kind = .{
+            .assignment = .{
+                .operator = .ADD_ASSIGN,
+                .target = 0,
+                .value = 3,
+            },
+        },
+    }, expr_node);
+
+    // target of '+=': identifier 'a'
+    const target_add_assign = parser.tree.getNode(0).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 1 },
+        .kind = .{ .identifier = "a" },
+    }, target_add_assign);
+
+    // value of '+=': assignment '='
+    const value_add_assign = parser.tree.getNode(3).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 5, .end = 10 },
+        .kind = .{
+            .assignment = .{
+                .operator = .ASSIGN,
+                .target = 1,
+                .value = 2,
+            },
+        },
+    }, value_add_assign);
+
+    // target of '=': identifier 'b'
+    const target_assign = parser.tree.getNode(1).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 5, .end = 6 },
+        .kind = .{ .identifier = "b" },
+    }, target_assign);
+
+    // value of '=': integer literal 2
+    const value_assign = parser.tree.getNode(2).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 9, .end = 10 },
+        .kind = .{ .integer_literal = 2 },
+    }, value_assign);
 }
