@@ -32,6 +32,8 @@ const LOG = std.log.scoped(.parser);
 pub const Error = error{
     UnexpectedToken,
     ExpectedStatement,
+    NodeNotFound,
+    ExpectedExpressionAtom,
 } || Lexer.Error || std.mem.Allocator.Error;
 
 pub fn init(alloc: std.mem.Allocator, lexer: *Lexer) Self {
@@ -396,6 +398,184 @@ pub fn parseCodeBlock(self: *Self) !usize {
     });
 }
 
+// Parse expression and return its ID if parsed.
+pub fn parseExpression(self: *Self, precedence: u8) !usize {
+    var left = try self.parseAtom();
+
+    while (true) {
+        const next = try self.peek();
+        const nextPrecedence = getPrecedence(next);
+
+        if (nextPrecedence <= precedence) {
+            // If next precedence is less than or equal to current precedence,
+            // we stop parsing expressions.
+            break;
+        }
+
+        _ = try self.expect(next.type);
+        const right = try parseExpression(self, nextPrecedence);
+
+        const left_node = self.tree.getNode(left).?;
+        const right_node = self.tree.getNode(right).?;
+
+        left = try self.tree.addNode(.{
+            .span = .{
+                .start = left_node.span.start,
+                .end = right_node.span.end,
+            },
+            .kind = .{
+                .binary_operator = .{
+                    .left = left,
+                    .operator = switch (next.type) {
+                        .MULTIPLY => .MULTIPLY,
+                        .DIVIDE => .DIVIDE,
+                        .MODULO => .MODULO,
+                        .ADD => .ADD,
+                        .SUBTRACT => .SUBTRACT,
+                        .BITSHIFT_RIGHT => .BITSHIFT_RIGHT,
+                        .BITSHIFT_LEFT => .BITSHIFT_LEFT,
+                        .LESS_THAN => .LESS_THAN,
+                        .LESS_EQUAL => .LESS_EQUAL,
+                        .GREATER_THAN => .GREATER_THAN,
+                        .GREATER_EQUAL => .GREATER_EQUAL,
+                        .EQ_EQ => .EQ_EQ,
+                        .NOT_EQ => .NOT_EQ,
+                        .BITWISE_AND => .BITWISE_AND,
+                        .BITWISE_XOR => .BITWISE_XOR,
+                        .BITWISE_OR => .BITWISE_OR,
+                        .LOGICAL_AND => .LOGICAL_AND,
+                        .LOGICAL_OR => .LOGICAL_OR,
+                        else => unreachable,
+                    },
+                    .right = right,
+                },
+            },
+        });
+    }
+
+    return left;
+}
+
+pub fn parseAtom(self: *Self) !usize {
+    const token = try self.advance();
+
+    return switch (token.type) {
+        .INTEGER_LITERAL => try self.tree.addNode(.{
+            .span = token.span,
+            .kind = .{ .integer_literal = token.literal.integer },
+        }),
+        .FLOAT_LITERAL => try self.tree.addNode(.{
+            .span = token.span,
+            .kind = .{ .float_literal = token.literal.float },
+        }),
+        .STRING_LITERAL => try self.tree.addNode(.{
+            .span = token.span,
+            .kind = .{ .string_literal = token.literal.string },
+        }),
+        .KW_TRUE, .KW_FALSE => try self.tree.addNode(.{
+            .span = token.span,
+            .kind = .{ .boolean_literal = token.type == .KW_TRUE },
+        }),
+        .BANG, .BITWISE_NOT, .SUBTRACT => try self.parseUnaryOperator(token),
+        .LEFT_PAREN => try self.parseParenthesizedExpr(),
+        .IDENTIFIER => {
+            try self.pushSpan();
+            defer _ = self.popSpan();
+
+            const iden = try self.tree.addNode(.{
+                .span = token.span,
+                .kind = .{ .identifier = token.lexeme },
+            });
+
+            const next = try self.peek();
+            if (next.type == .INCREMENT or next.type == .DECREMENT) {
+                _ = try self.expect(next.type);
+                return self.tree.addNode(.{
+                    .span = self.peekSpan(),
+                    .kind = .{ .unary_operator = .{
+                        .operand = iden,
+                        .operator = switch (next.type) {
+                            .INCREMENT => .INCREMENT,
+                            .DECREMENT => .DECREMENT,
+                            else => unreachable,
+                        },
+                    } },
+                });
+            }
+
+            return iden;
+        },
+        else => return self.reportError(
+            "P003",
+            "Expected an expression atom.",
+            .{},
+            error.ExpectedExpressionAtom,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .magenta },
+                    .span = token.span.asReportz(),
+                    .message = "Found this instead.",
+                }},
+            },
+        ),
+    };
+}
+
+pub fn parseUnaryOperator(self: *Self, operator_token: Token) Self.Error!usize {
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const operand = try self.parseAtom();
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{
+            .unary_operator = .{
+                .operator = switch (operator_token.type) {
+                    .BANG => .NOT,
+                    .BITWISE_NOT => .BITWISE_NOT,
+                    .SUBTRACT => .SUBTRACT, // Unary minus
+                    else => unreachable,
+                },
+                .operand = operand,
+            },
+        },
+    });
+}
+
+pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    const expr = try self.parseExpression(0); // 0 precedence means we can parse any expression.
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const expr_node = self.tree.getNode(expr).?;
+
+    const new_node = ast.Node{
+        .span = self.peekSpan(),
+        .kind = expr_node.kind,
+    };
+
+    try self.tree.replaceNode(expr, new_node); // Replace old node with new one.
+
+    return expr;
+}
+
+pub fn getPrecedence(op: Token) u8 {
+    switch (op.type) {
+        .MULTIPLY, .DIVIDE, .MODULO => return 10,
+        .ADD, .SUBTRACT => return 9,
+        .BITSHIFT_RIGHT, .BITSHIFT_LEFT => return 8,
+        .LESS_THAN, .LESS_EQUAL, .GREATER_THAN, .GREATER_EQUAL => return 7,
+        .EQ_EQ, .NOT_EQ => return 6,
+        .BITWISE_AND => return 5,
+        .BITWISE_XOR => return 4,
+        .BITWISE_OR => return 3,
+        .LOGICAL_AND => return 2,
+        .LOGICAL_OR => return 1,
+        else => return 0, // No precedence for other tokens.
+    }
+}
+
 test "parseWholeSource method should parse multiple statements" {
     const source =
         \\import "source.brr";
@@ -491,4 +671,327 @@ test "Parse code block" {
         .span = .{ .start = 0, .end = 21 },
         .kind = .{ .code_block = &.{1} },
     }, block_node);
+}
+
+test "Parse broken simple addition expression expecting error" {
+    const source = "2 + ";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    try std.testing.expectError(
+        error.ExpectedExpressionAtom,
+        parser.parseExpression(0),
+    );
+}
+
+test "Parse simple addition expression" {
+    const source = "2 + 2";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    // Parse the expression
+    const expr_id = try parser.parseExpression(0);
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Verify root node structure
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 5 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 0, // Left operand ID
+                .operator = .ADD,
+                .right = 1, // Right operand ID
+            },
+        },
+    }, expr_node);
+
+    // Verify left operand (first '2')
+    const left_node = parser.tree.getNode(expr_node.kind.binary_operator.left).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 1 },
+        .kind = .{ .integer_literal = 2 },
+    }, left_node);
+
+    // Verify right operand (second '2')
+    const right_node = parser.tree.getNode(expr_node.kind.binary_operator.right).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 4, .end = 5 },
+        .kind = .{ .integer_literal = 2 },
+    }, right_node);
+}
+
+test "Parse expression with parentheses" {
+    const source = "(2 + 3) * 4";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    // Parse the expression
+    const expr_id = try parser.parseExpression(0);
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: *
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 11 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 2,
+                .operator = .MULTIPLY,
+                .right = 3,
+            },
+        },
+    }, expr_node);
+
+    // Left operand: (2 + 3)
+    const left_mul = parser.tree.getNode(2).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 7 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 0,
+                .operator = .ADD,
+                .right = 1,
+            },
+        },
+    }, left_mul);
+
+    // Right operand: 4
+    const right_mul = parser.tree.getNode(3).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 10, .end = 11 },
+        .kind = .{ .integer_literal = 4 },
+    }, right_mul);
+
+    // Left operand of +
+    const left_add = parser.tree.getNode(0).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 1, .end = 2 },
+        .kind = .{ .integer_literal = 2 },
+    }, left_add);
+
+    // Right operand of +
+    const right_add = parser.tree.getNode(1).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 5, .end = 6 },
+        .kind = .{ .integer_literal = 3 },
+    }, right_add);
+}
+
+test "Parse complex expression with operators" {
+    const source = "-2 == 8 * 4 / (2 + abc++) || a > ~b + 3";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = try parser.parseExpression(0);
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // IDs assigned in order:
+    //
+    // 0: integer_literal 2
+    // 1: unary_operator -2
+    // 2: integer_literal 8
+    // 3: integer_literal 4
+    // 4: binary_operator 8 * 4
+    // 5: integer_literal 2
+    // 6: identifier "abc"
+    // 7: unary_operator abc++
+    // 8: binary_operator (2 + abc++)
+    // 9: binary_operator (8*4) / (2 + abc++)
+    //10: binary_operator (-2) == (...)
+    //11: identifier "a"
+    //12: identifier "b"
+    //13: unary_operator ~b
+    //14: integer_literal 3
+    //15: binary_operator (~b) + 3
+    //16: binary_operator a > (...)
+    //17: binary_operator (...) || (...)
+
+    //
+    // Now we validate from the top down:
+    //
+
+    // Top: OR
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .binary_operator = .{
+                .left = 10,
+                .operator = .LOGICAL_OR,
+                .right = 16,
+            },
+        },
+    }, expr_node);
+
+    // Left of OR: ==
+    const eq_node = parser.tree.getNode(10).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 25 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 1,
+                .operator = .EQ_EQ,
+                .right = 9,
+            },
+        },
+    }, eq_node);
+
+    // Right of OR: >
+    const gt_node = parser.tree.getNode(16).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 29, .end = 39 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 11,
+                .operator = .GREATER_THAN,
+                .right = 15,
+            },
+        },
+    }, gt_node);
+
+    // Left operand of ==
+    const minus2 = parser.tree.getNode(1).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 2 },
+        .kind = .{
+            .unary_operator = .{
+                .operator = .SUBTRACT,
+                .operand = 0,
+            },
+        },
+    }, minus2);
+
+    // literal 2
+    const lit2 = parser.tree.getNode(0).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 1, .end = 2 },
+        .kind = .{ .integer_literal = 2 },
+    }, lit2);
+
+    // Right operand of ==
+    const div_node = parser.tree.getNode(9).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 6, .end = 25 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 4,
+                .operator = .DIVIDE,
+                .right = 8,
+            },
+        },
+    }, div_node);
+
+    // 8 * 4
+    const mul_node = parser.tree.getNode(4).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 6, .end = 11 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 2,
+                .operator = .MULTIPLY,
+                .right = 3,
+            },
+        },
+    }, mul_node);
+
+    // 8 literal
+    const lit8 = parser.tree.getNode(2).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 6, .end = 7 },
+        .kind = .{ .integer_literal = 8 },
+    }, lit8);
+
+    // 4 literal
+    const lit4 = parser.tree.getNode(3).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 10, .end = 11 },
+        .kind = .{ .integer_literal = 4 },
+    }, lit4);
+
+    // (2 + abc++)
+    const plus_node = parser.tree.getNode(8).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 14, .end = 25 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 5,
+                .operator = .ADD,
+                .right = 7,
+            },
+        },
+    }, plus_node);
+
+    // literal 2
+    const lit2b = parser.tree.getNode(5).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 15, .end = 16 },
+        .kind = .{ .integer_literal = 2 },
+    }, lit2b);
+
+    // abc++
+    const inc_node = parser.tree.getNode(7).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 19, .end = 24 },
+        .kind = .{
+            .unary_operator = .{
+                .operator = .INCREMENT,
+                .operand = 6,
+            },
+        },
+    }, inc_node);
+
+    // abc identifier
+    const id_abc = parser.tree.getNode(6).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 19, .end = 22 },
+        .kind = .{ .identifier = "abc" },
+    }, id_abc);
+
+    // Left of >: a
+    const id_a = parser.tree.getNode(11).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 29, .end = 30 },
+        .kind = .{ .identifier = "a" },
+    }, id_a);
+
+    // (~b) + 3
+    const plus_b3 = parser.tree.getNode(15).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 33, .end = 39 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 13,
+                .operator = .ADD,
+                .right = 14,
+            },
+        },
+    }, plus_b3);
+
+    // ~b
+    const not_b = parser.tree.getNode(13).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 33, .end = 35 },
+        .kind = .{
+            .unary_operator = .{
+                .operator = .BITWISE_NOT,
+                .operand = 12,
+            },
+        },
+    }, not_b);
+
+    // identifier b
+    const id_b = parser.tree.getNode(12).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 34, .end = 35 },
+        .kind = .{ .identifier = "b" },
+    }, id_b);
+
+    // 3 literal
+    const lit3 = parser.tree.getNode(14).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 38, .end = 39 },
+        .kind = .{ .integer_literal = 3 },
+    }, lit3);
 }
