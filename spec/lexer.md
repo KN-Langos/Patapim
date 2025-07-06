@@ -28,6 +28,7 @@ Names are just examples, they can be changed in the implementation.
 '|'  BITWISE_OR
 '&'  BITWISE_AND
 '^'  BITWISE_XOR
+'~'  BITWISE_NOT
 'and'/'&&' LOGICAL_AND
 'or'/'||'  LOGICAL_OR
 '<<' BITSHIFT_LEFT

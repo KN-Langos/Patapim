@@ -95,13 +95,6 @@ pub const NativeParameter = struct {
     type: ?NodeId,
 };
 
-// Variable reference, this is equivalent to the following code:
-// `variable_name`
-// This is used to reference variables in expressions, statements, etc.
-pub const VariableReference = struct {
-    name: NodeId,
-};
-
 // Binary operator node. This is equivalent to the following code:
 // `left + right`
 pub const BinaryOperator = struct {
