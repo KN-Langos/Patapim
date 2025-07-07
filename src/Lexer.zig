@@ -476,6 +476,14 @@ fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
 
             last_char_is_digit = false;
         } else if (char == '.') {
+            if (!self.isAtEnd()) {
+                const dot_char = self.source[self.current + 1];
+
+                if (dot_char == '.') {
+                    break; // This is a range operator, not a float.
+                }
+            }
+
             // If we already have a dot, this is not a valid number.
             if (is_float) return self.reportError("L02", "Floating number has multiple dots.", error.InvalidNumberLiteral);
 
@@ -974,5 +982,31 @@ test "Lex operators" {
         .type = .RANGE,
         .span = .{ .start = 35, .end = 37 },
         .lexeme = "..",
+    }, try lexer.next(alloc));
+}
+
+test "Lex range operator in between numbers" {
+    const source = "1..10";
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 0, .end = 1 },
+        .lexeme = "1",
+        .literal = .{ .integer = 1 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .RANGE,
+        .span = .{ .start = 1, .end = 3 },
+        .lexeme = "..",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 3, .end = 5 },
+        .lexeme = "10",
+        .literal = .{ .integer = 10 },
     }, try lexer.next(alloc));
 }
