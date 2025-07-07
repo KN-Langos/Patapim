@@ -34,6 +34,7 @@ pub const Error = error{
     ExpectedStatement,
     NodeNotFound,
     ExpectedExpressionAtom,
+    ExpectedComma,
 } || Lexer.Error || std.mem.Allocator.Error;
 
 pub fn init(alloc: std.mem.Allocator, lexer: *Lexer) Self {
@@ -277,6 +278,37 @@ pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
             .expression = expression,
         } },
     });
+}
+
+pub fn parseMaybeStructStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_STRUCT) == null) return null; // This may not be a struct statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const struct_name = try self.expectIdentifier();
+    _ = try self.expect(.LEFT_CURLY);
+    var fields = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer fields.deinit(); // This may return error early.
+    while (try self.maybe(.RIGHT_CURLY) == null) {
+        const potential_function = self.parseMaybeFunctionDefStatement();
+        if (potential_function != null) {
+            try fields.append(potential_function);
+        } else {
+            const field_name = try self.expectIdentifier();
+            try self.pushSpan();
+            defer _ = self.popSpan();
+            const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .field = .{
+                .name = field_name,
+            } } });
+            try fields.append(field);
+        }
+        if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_CURLY);
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
+                .name = struct_name,
+                .fields = fields.toOwnedSlice(),
+            } } });
+        }
+    }
 }
 
 // Parse import statement and return its ID if parsed.
