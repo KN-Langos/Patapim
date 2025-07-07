@@ -41,6 +41,8 @@ pub const NodeKind = union(enum) {
     native_function_decl: NativeFunctionDecl,
     variable: Variable,
     constant: Const,
+    loop: Loop,
+
     // ---< Expression nodes >---
 };
 
@@ -108,6 +110,13 @@ pub const NativeFunctionDecl = struct {
 pub const NativeParameter = struct {
     name: NodeId,
     type: ?NodeId,
+};
+
+// Loop node. This is equivalent to the following code:
+// `loop { ... }`
+// This is a special node, because it has no condition.
+pub const Loop = struct {
+    body: NodeId,
 };
 
 // Binary operator node. This is equivalent to the following code:

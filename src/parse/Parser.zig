@@ -225,6 +225,9 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeNativeFunctionDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
+    if (try self.parseMaybeLoop()) |stmt| return stmt;
+    //if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
+    //if (try self.parseMaybeForLoop()) |stmt| return stmt;
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
     return self.reportError(
@@ -260,6 +263,7 @@ pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
         } },
     });
 }
+
 // parse constant declaration statement and return its ID if parsed.
 // For more information please reference `ast.zig -> Const` struct.
 pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
@@ -413,6 +417,22 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
             .abi = abi_node,
             .name = fn_name,
             .parameters = try fn_parameters.toOwnedSlice(),
+        } },
+    });
+}
+
+// Parse maybe loop statement and return its ID if parsed.
+pub fn parseMaybeLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_LOOP) == null) return null; // This may not be a loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .loop = .{
+            .body = body,
         } },
     });
 }
@@ -753,6 +773,27 @@ test "Parse native function declaration statement" {
             .parameters = &.{ 4, 6 },
         } },
     }, fn_node);
+}
+
+test "Parse simple loop statement" {
+    const source = "loop {}";
+
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeLoop()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: loop
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .loop = .{
+                .body = 0,
+            },
+        },
+    }, expr_node);
 }
 
 test "Parse code block" {
