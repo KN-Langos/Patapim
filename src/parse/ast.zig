@@ -43,6 +43,7 @@ pub const NodeKind = union(enum) {
     constant: Const,
     loop: Loop,
     while_loop: WhileLoop,
+    for_loop: ForLoop,
 
     // ---< Expression nodes >---
 };
@@ -127,6 +128,14 @@ pub const WhileLoop = struct {
     body: NodeId,
 };
 
+// For loop node. This is equivalent to the following code:
+// `for (i in 0..10) { ... }`
+pub const ForLoop = struct {
+    binding: NodeId, // This is the variable that is bound to the loop.
+    iterable: NodeId, // This is the iterable that is being looped over.
+    body: NodeId,
+};
+
 // Binary operator node. This is equivalent to the following code:
 // `left + right`
 pub const BinaryOperator = struct {
@@ -192,6 +201,8 @@ pub const Operator = enum {
     // Increment/Decrement operators
     INCREMENT, // '++'
     DECREMENT, // '--'
+
+    RANGE, // '..' (used in for loops)
 
     UNKNOWN,
 };

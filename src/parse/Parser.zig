@@ -227,7 +227,8 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeLoop()) |stmt| return stmt;
     if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
-    //if (try self.parseMaybeForLoop()) |stmt| return stmt;
+    if (try self.parseMaybeForLoop()) |stmt| return stmt;
+
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
     return self.reportError(
@@ -458,6 +459,29 @@ pub fn parseMaybeWhileLoop(self: *Self) !?usize {
     });
 }
 
+pub fn parseMaybeForLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_FOR) == null) return null; // This may not be a for loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.LEFT_PAREN);
+    const binding = try self.expectIdentifier();
+    _ = try self.expect(.KW_IN);
+    const iterable = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .for_loop = .{
+            .binding = binding,
+            .iterable = iterable,
+            .body = body,
+        } },
+    });
+}
+
 // Parse block of code.
 // This is basically a statement list inside of `{}` parentheses.
 // This function assumes that caller has checked for `{` character already.
@@ -532,6 +556,7 @@ pub fn parseBinaryExpression(self: *Self, precedence: u8) !usize {
                     .binary_operator = .{
                         .left = left,
                         .operator = switch (next.type) {
+                            .RANGE => .RANGE,
                             .MULTIPLY => .MULTIPLY,
                             .DIVIDE => .DIVIDE,
                             .MODULO => .MODULO,
@@ -664,6 +689,7 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
 
 pub fn getPrecedence(op: Token) u8 {
     switch (op.type) {
+        .RANGE => return 12,
         .MULTIPLY, .DIVIDE, .MODULO => return 11,
         .ADD, .SUBTRACT => return 10,
         .BITSHIFT_RIGHT, .BITSHIFT_LEFT => return 9,
@@ -834,6 +860,29 @@ test "Parse simple while loop statement" {
             .while_loop = .{
                 .condition = 2,
                 .body = 3,
+            },
+        },
+    }, expr_node);
+}
+
+test "Parse simple for loop statement" {
+    const source = "for(i in 1 .. 10) {}";
+
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeForLoop()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: for_loop
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .for_loop = .{
+                .binding = 0,
+                .iterable = 3,
+                .body = 4,
             },
         },
     }, expr_node);
