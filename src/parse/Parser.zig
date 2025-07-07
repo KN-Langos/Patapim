@@ -226,7 +226,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeLoop()) |stmt| return stmt;
-    //if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
+    if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
     //if (try self.parseMaybeForLoop()) |stmt| return stmt;
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -432,6 +432,27 @@ pub fn parseMaybeLoop(self: *Self) !?usize {
     return try self.tree.addNode(.{
         .span = self.peekSpan(),
         .kind = .{ .loop = .{
+            .body = body,
+        } },
+    });
+}
+
+// Parse maybe while loop statement and return its ID if parsed.
+pub fn parseMaybeWhileLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_WHILE) == null) return null; // This may not be a while loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.LEFT_PAREN);
+    const condition = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .while_loop = .{
+            .condition = condition,
             .body = body,
         } },
     });
@@ -791,6 +812,28 @@ test "Parse simple loop statement" {
         .kind = .{
             .loop = .{
                 .body = 0,
+            },
+        },
+    }, expr_node);
+}
+
+test "Parse simple while loop statement" {
+    const source = "while(abc > 10) {}";
+
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeWhileLoop()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: while_loop
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .while_loop = .{
+                .condition = 2,
+                .body = 3,
             },
         },
     }, expr_node);

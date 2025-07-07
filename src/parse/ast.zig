@@ -42,6 +42,7 @@ pub const NodeKind = union(enum) {
     variable: Variable,
     constant: Const,
     loop: Loop,
+    while_loop: WhileLoop,
 
     // ---< Expression nodes >---
 };
@@ -116,6 +117,13 @@ pub const NativeParameter = struct {
 // `loop { ... }`
 // This is a special node, because it has no condition.
 pub const Loop = struct {
+    body: NodeId,
+};
+
+// While loop node. This is equivalent to the following code:
+// `while(condition) { ... }`
+pub const WhileLoop = struct {
+    condition: NodeId,
     body: NodeId,
 };
 
