@@ -25,6 +25,7 @@ pub const NodeKind = union(enum) {
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
+    field: Field,
 
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
@@ -41,6 +42,8 @@ pub const NodeKind = union(enum) {
     native_function_decl: NativeFunctionDecl,
     variable: Variable,
     constant: Const,
+    structure: Struct,
+
     // ---< Expression nodes >---
 };
 
@@ -77,6 +80,17 @@ pub const Const = struct {
     name: NodeId,
     expression: NodeId,
 };
+// Structure definition. This is equivalent to the following code:
+// struct [name] { field1, field2, ... }`
+pub const Struct = struct {
+    name: NodeId,
+    fields: []const NodeId, // This is a list of fields.
+};
+// Structure field. Now it only holds the field name
+pub const Field: type = struct {
+    name: NodeId,
+};
+
 // Function definition. This is equivalent to the following code:
 // `fn name(arg1, arg2) { ... }`
 // Native functions are defined by NativeFunctionDecl.
