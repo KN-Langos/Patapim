@@ -96,7 +96,6 @@ pub const Field: type = struct {
 //Anonymous structure definition. This is equivalent to the following code:
 //  brr [name] = #{ field1, field2, ... }`
 pub const AnonymousStruct: type = struct {
-    name: NodeId,
     fields: []const NodeId,
 };
 // Anonymous structure field. Now it holds the field name and expression
