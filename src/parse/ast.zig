@@ -25,6 +25,8 @@ pub const NodeKind = union(enum) {
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
+    function_call: FunctionCall,
+    member_access: MemberAccess,
 
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
@@ -41,6 +43,7 @@ pub const NodeKind = union(enum) {
     native_function_decl: NativeFunctionDecl,
     variable: Variable,
     constant: Const,
+
     // ---< Expression nodes >---
 };
 
@@ -64,6 +67,7 @@ pub const Import = struct {
     source: NodeId,
     opt_rename: ?NodeId = null,
 };
+
 // Variable declaration. This is equivalent to the following code:
 // brr [var name] = [expression];
 pub const Variable = struct {
@@ -77,6 +81,7 @@ pub const Const = struct {
     name: NodeId,
     expression: NodeId,
 };
+
 // Function definition. This is equivalent to the following code:
 // `fn name(arg1, arg2) { ... }`
 // Native functions are defined by NativeFunctionDecl.
@@ -110,6 +115,16 @@ pub const NativeParameter = struct {
     type: ?NodeId,
 };
 
+pub const FunctionCall = struct {
+    name: NodeId,
+    arguments: []const NodeId,
+};
+
+pub const MemberAccess = struct {
+    target: NodeId, // This is the object being accessed
+    member: NodeId, // This is the member being accessed
+};
+
 // Binary operator node. This is equivalent to the following code:
 // `left + right`
 pub const BinaryOperator = struct {
@@ -133,6 +148,7 @@ pub const Assignment = struct {
     value: NodeId, // Expression
 };
 
+// Expression group node. This is used to group expressions together.
 pub const ExpressionGroup = struct {
     expression: NodeId,
 };
