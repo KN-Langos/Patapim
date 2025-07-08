@@ -280,7 +280,8 @@ pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
         } },
     });
 }
-
+//parse struct declaration statement and return its ID if parsed
+// For more information please reference `ast.zig -> Structure` struct.
 pub fn parseMaybeStructStatement(self: *Self) !?usize {
     if (try self.maybe(.KW_STRUCT) == null) return null; // This may not be a struct statement.
     try self.pushSpan();
@@ -290,9 +291,9 @@ pub fn parseMaybeStructStatement(self: *Self) !?usize {
     var fields = std.ArrayList(usize).init(self.tree.allocator());
     errdefer fields.deinit(); // This may return error early.
     while (try self.maybe(.RIGHT_CURLY) == null) {
-        const potential_function = self.parseMaybeFunctionDefStatement();
+        const potential_function = try self.parseMaybeFunctionDefStatement();
         if (potential_function != null) {
-            try fields.append(potential_function);
+            try fields.append(potential_function.?);
         } else {
             const field_name = try self.expectIdentifier();
             try self.pushSpan();
@@ -304,12 +305,21 @@ pub fn parseMaybeStructStatement(self: *Self) !?usize {
         }
         if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
+            _ = try self.maybe(.SEMICOLON);
             return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
                 .name = struct_name,
-                .fields = fields.toOwnedSlice(),
+                .fields = try fields.toOwnedSlice(),
+            } } });
+        }
+        if (try self.maybe(.RIGHT_CURLY) != null) {
+            _ = try self.maybe(.SEMICOLON);
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
+                .name = struct_name,
+                .fields = try fields.toOwnedSlice(),
             } } });
         }
     }
+    return error.ExpectedStatement; // maybe sth different here, in theory shouldn't reach
 }
 
 // Parse import statement and return its ID if parsed.
@@ -786,6 +796,23 @@ test "Parse native function declaration statement" {
             .parameters = &.{ 4, 6 },
         } },
     }, fn_node);
+}
+
+test "Parse struct Declaration type1" {
+    const source = "struct foo {patapim, sahur, fn lorem (helloworld){}, };";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const structure = (try parser.parseMaybeStructStatement()).?;
+    const struct_node = parser.tree.getNodeUnsafe(structure);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 55 },
+        .kind = .{ .structure = .{
+            .name = 0,
+            .fields = &.{ 2, 4, 9 },
+        } },
+    }, struct_node);
 }
 
 test "Parse code block" {
