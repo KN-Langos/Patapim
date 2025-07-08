@@ -26,6 +26,7 @@ pub const NodeKind = union(enum) {
     native_parameter: NativeParameter,
     code_block: []const NodeId,
     field: Field,
+    enumField: EnumField,
 
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
@@ -43,6 +44,7 @@ pub const NodeKind = union(enum) {
     variable: Variable,
     constant: Const,
     structure: Struct,
+    enumeration: Enum,
 
     // ---< Expression nodes >---
 };
@@ -86,8 +88,20 @@ pub const Struct = struct {
     name: NodeId,
     fields: []const NodeId, // This is a list of fields.
 };
+
 // Structure field. Now it only holds the field name
 pub const Field: type = struct {
+    name: NodeId,
+};
+// Enum definition. This is equivalent to following code:
+// enum [name] {field1, field2, ...}
+pub const Enum = struct {
+    name: NodeId,
+    fields: []const NodeId, // This is a list of fields.
+};
+
+// enum field. Now it only holds the field name
+pub const EnumField: type = struct {
     name: NodeId,
 };
 

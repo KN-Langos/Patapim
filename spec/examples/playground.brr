@@ -41,7 +41,7 @@ do { ... } while (a < b)
 for (a in b) { ... }
 for (i in 0..1) { ... }
 
-struct MyIterator {
+struct MyIterator {`
     fn next() { 
         return 1; // first invocation
         return null; // last invocation

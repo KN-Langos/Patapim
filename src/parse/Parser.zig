@@ -227,6 +227,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeStructStatement()) |stmt| return stmt;
+    if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
     return self.reportError(
@@ -297,11 +298,12 @@ pub fn parseMaybeStructStatement(self: *Self) !?usize {
         } else {
             const field_name = try self.expectIdentifier();
             try self.pushSpan();
-            defer _ = self.popSpan();
+
             const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .field = .{
                 .name = field_name,
             } } });
             try fields.append(field);
+            _ = self.popSpan();
         }
         if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
@@ -315,6 +317,44 @@ pub fn parseMaybeStructStatement(self: *Self) !?usize {
             _ = try self.maybe(.SEMICOLON);
             return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
                 .name = struct_name,
+                .fields = try fields.toOwnedSlice(),
+            } } });
+        }
+    }
+    return error.ExpectedStatement; // maybe sth different here, in theory shouldn't reach
+}
+
+//parse enum declaration statement and return its ID if parsed
+// For more information please reference `ast.zig -> Enum` struct.
+pub fn parseMaybeEnumStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_ENUM) == null) return null; // This may not be a enum statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const enum_name = try self.expectIdentifier();
+    _ = try self.expect(.LEFT_CURLY);
+    var fields = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer fields.deinit(); // This may return error early.
+    while (try self.maybe(.RIGHT_CURLY) == null) {
+        const field_name = try self.expectIdentifier();
+        try self.pushSpan();
+
+        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enumField = .{
+            .name = field_name,
+        } } });
+        try fields.append(field);
+        _ = self.popSpan();
+        if (try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_CURLY);
+            _ = try self.maybe(.SEMICOLON);
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enumeration = .{
+                .name = enum_name,
+                .fields = try fields.toOwnedSlice(),
+            } } });
+        }
+        if (try self.maybe(.RIGHT_CURLY) != null) {
+            _ = try self.maybe(.SEMICOLON);
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enumeration = .{
+                .name = enum_name,
                 .fields = try fields.toOwnedSlice(),
             } } });
         }
@@ -813,6 +853,23 @@ test "Parse struct Declaration type1" {
             .fields = &.{ 2, 4, 9 },
         } },
     }, struct_node);
+}
+
+test "Parse enum Declaration type1" {
+    const source = "enum myEnum {PATAPIM, SAHUR, HELLO_WORLD,};";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const enumeration = (try parser.parseMaybeEnumStatement()).?;
+    const enum_node = parser.tree.getNodeUnsafe(enumeration);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 43 },
+        .kind = .{ .enumeration = .{
+            .name = 0,
+            .fields = &.{ 2, 4, 6 },
+        } },
+    }, enum_node);
 }
 
 test "Parse code block" {
