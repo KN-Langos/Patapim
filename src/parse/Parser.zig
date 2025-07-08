@@ -224,10 +224,12 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeImportStatement()) |stmt| return stmt;
     if (try self.parseMaybeFunctionDefStatement()) |stmt| return stmt;
     if (try self.parseMaybeNativeFunctionDeclStatement()) |stmt| return stmt;
+    if (try self.parseMaybeAnonymStructStatement()) |stmt| return stmt; // must be chcecked before variables, uses same KW
     if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeStructStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
+
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
     return self.reportError(
@@ -316,6 +318,51 @@ pub fn parseMaybeStructStatement(self: *Self) !?usize {
         if (try self.maybe(.RIGHT_CURLY) != null) {
             _ = try self.maybe(.SEMICOLON);
             return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
+                .name = struct_name,
+                .fields = try fields.toOwnedSlice(),
+            } } });
+        }
+    }
+    return error.ExpectedStatement; // maybe sth different here, in theory shouldn't reach
+}
+
+//parse anonymous struct declaration statement and return its ID if parsed
+// For more information please reference `ast.zig -> AnStruct` struct.
+// must be checked before variables not to cause issues with one another, because of the same KW at the start
+pub fn parseMaybeAnonymStructStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_VARIABLE) == null) return null;
+    try self.pushSpan();
+    defer _ = self.popSpan();
+    const struct_name = try self.expectIdentifier();
+    _ = try self.expect(.ASSIGN);
+    if (try self.maybe(.HASH) == null) return null;
+
+    _ = try self.expect(.LEFT_CURLY);
+    var fields = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer fields.deinit(); // This may return error early.
+    while (try self.maybe(.RIGHT_CURLY) == null) {
+        const field_name = try self.expectIdentifier();
+        try self.pushSpan();
+        _ = try self.expect(.COLON);
+        const expression = try self.parseExpression();
+        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anStructField = .{
+            .name = field_name,
+            .expression = expression,
+        } } });
+        try fields.append(field);
+        _ = self.popSpan();
+
+        if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_CURLY);
+            _ = try self.expect(.SEMICOLON);
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anStruct = .{
+                .name = struct_name,
+                .fields = try fields.toOwnedSlice(),
+            } } });
+        }
+        if (try self.maybe(.RIGHT_CURLY) != null) {
+            _ = try self.expect(.SEMICOLON);
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anStruct = .{
                 .name = struct_name,
                 .fields = try fields.toOwnedSlice(),
             } } });
@@ -838,7 +885,7 @@ test "Parse native function declaration statement" {
     }, fn_node);
 }
 
-test "Parse struct Declaration type1" {
+test "Parse  struct Declaration type1" {
     const source = "struct foo {patapim, sahur, fn lorem (helloworld){}, };";
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
@@ -851,6 +898,23 @@ test "Parse struct Declaration type1" {
         .kind = .{ .structure = .{
             .name = 0,
             .fields = &.{ 2, 4, 9 },
+        } },
+    }, struct_node);
+}
+
+test "Parse anonymous struct Declaration type1" {
+    const source = "brr Patapim =  #{age: 32, bankAcc: 12345};";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const structure = (try parser.parseMaybeAnonymStructStatement()).?;
+    const struct_node = parser.tree.getNodeUnsafe(structure);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 42 },
+        .kind = .{ .anStruct = .{
+            .name = 0,
+            .fields = &.{ 3, 6 },
         } },
     }, struct_node);
 }

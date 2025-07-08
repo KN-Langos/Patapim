@@ -27,7 +27,7 @@ pub const NodeKind = union(enum) {
     code_block: []const NodeId,
     field: Field,
     enumField: EnumField,
-
+    anStructField: AnStructField,
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
     unary_operator: UnaryOperator,
@@ -45,7 +45,7 @@ pub const NodeKind = union(enum) {
     constant: Const,
     structure: Struct,
     enumeration: Enum,
-
+    anStruct: AnonymousStruct,
     // ---< Expression nodes >---
 };
 
@@ -93,6 +93,18 @@ pub const Struct = struct {
 pub const Field: type = struct {
     name: NodeId,
 };
+//Anonymous structure definition. This is equivalent to the following code:
+//  brr [name] = #{ field1, field2, ... }`
+pub const AnonymousStruct: type = struct {
+    name: NodeId,
+    fields: []const NodeId,
+};
+// Anonymous structure field. Now it holds the field name and expression
+pub const AnStructField: type = struct {
+    name: NodeId,
+    expression: NodeId,
+};
+
 // Enum definition. This is equivalent to following code:
 // enum [name] {field1, field2, ...}
 pub const Enum = struct {
