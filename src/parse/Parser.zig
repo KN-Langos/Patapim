@@ -661,6 +661,12 @@ fn parseConditional(self: *Self) !usize {
         _ = try self.expect(.KW_IF);
     }
 
+    _ = try self.expect(.LEFT_PAREN);
+    const condition = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const body = try self.parseCodeBlock();
+
     var else_conditional: ?usize = null;
 
     if (try self.maybe(.KW_ELSE) != null) {
@@ -1181,7 +1187,7 @@ test "Parse simple loop statement" {
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
-    
+
     const expr_id = (try parser.parseMaybeLoop()).?;
     const expr_node = parser.tree.getNode(expr_id).?;
 
@@ -1201,7 +1207,7 @@ test "Parse simple while loop statement" {
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
-    
+
     const expr_id = (try parser.parseMaybeWhileLoop()).?;
     const expr_node = parser.tree.getNode(expr_id).?;
 
@@ -1222,7 +1228,6 @@ test "Parse simple for loop statement" {
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
-
 
     const expr_id = (try parser.parseMaybeForLoop()).?;
     const expr_node = parser.tree.getNode(expr_id).?;
@@ -1292,7 +1297,7 @@ test "Parse inline conditional expression" {
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
-    
+
     const expr_id = try parser.parseExpression();
     const expr_node = parser.tree.getNodeUnsafe(expr_id);
 
