@@ -179,7 +179,7 @@ pub const ForLoop = struct {
 };
 
 pub const FunctionCall = struct {
-    name: NodeId,
+    target: NodeId,
     arguments: []const NodeId,
 };
 
