@@ -30,7 +30,7 @@ pub const NodeKind = union(enum) {
     field: Field,
     enumField: EnumField,
     anStructField: AnStructField,
-    
+
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
     unary_operator: UnaryOperator,
@@ -49,7 +49,8 @@ pub const NodeKind = union(enum) {
     structure: Struct,
     enumeration: Enum,
     anStruct: AnonymousStruct,
-    
+    conditional: Conditional,
+
     // ---< Expression nodes >---
 };
 
@@ -165,6 +166,12 @@ pub const FunctionCall = struct {
 pub const MemberAccess = struct {
     target: NodeId, // This is the object being accessed
     member: NodeId, // This is the member being accessed
+};
+
+pub const Conditional = struct {
+    condition: ?NodeId, // This is the condition being checked
+    body: NodeId, // This is the body of the conditional
+    else_conditional: ?NodeId = null, // This is the optional else if/else conditional
 };
 
 // Binary operator node. This is equivalent to the following code:
