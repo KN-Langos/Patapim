@@ -36,6 +36,7 @@ pub const NodeKind = union(enum) {
     unary_operator: UnaryOperator,
     assignment: Assignment,
     expression_group: ExpressionGroup,
+    inline_conditional: InlineConditional,
 
     // ---< Special nodes >---
     module: Module,
@@ -172,6 +173,12 @@ pub const Conditional = struct {
     condition: ?NodeId, // This is the condition being checked
     body: NodeId, // This is the body of the conditional
     else_conditional: ?NodeId = null, // This is the optional else if/else conditional
+};
+
+pub const InlineConditional = struct {
+    condition: NodeId, // This is the condition being checked
+    then_expr: NodeId, // This is the expression to evaluate if condition is true
+    else_expr: NodeId, // This is the expression to evaluate if condition is false
 };
 
 // Binary operator node. This is equivalent to the following code:
