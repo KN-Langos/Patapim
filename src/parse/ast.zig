@@ -25,12 +25,18 @@ pub const NodeKind = union(enum) {
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
+    function_call: FunctionCall,
+    member_access: MemberAccess,
+    field: Field,
+    enumField: EnumField,
+    anStructField: AnStructField,
 
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
     unary_operator: UnaryOperator,
     assignment: Assignment,
     expression_group: ExpressionGroup,
+    inline_conditional: InlineConditional,
 
     // ---< Special nodes >---
     module: Module,
@@ -44,6 +50,10 @@ pub const NodeKind = union(enum) {
     loop: Loop,
     while_loop: WhileLoop,
     for_loop: ForLoop,
+    structure: Struct,
+    enumeration: Enum,
+    anStruct: AnonymousStruct,
+    conditional: Conditional,
 
     // ---< Expression nodes >---
 };
@@ -68,6 +78,7 @@ pub const Import = struct {
     source: NodeId,
     opt_rename: ?NodeId = null,
 };
+
 // Variable declaration. This is equivalent to the following code:
 // brr [var name] = [expression];
 pub const Variable = struct {
@@ -81,6 +92,43 @@ pub const Const = struct {
     name: NodeId,
     expression: NodeId,
 };
+
+// Structure definition. This is equivalent to the following code:
+// struct [name] { field1, field2, ... }`
+pub const Struct = struct {
+    name: NodeId,
+    fields: []const NodeId, // This is a list of fields.
+};
+
+// Structure field. Now it only holds the field name
+pub const Field: type = struct {
+    name: NodeId,
+};
+
+//Anonymous structure definition. This is equivalent to the following code:
+//  brr [name] = #{ field1, field2, ... }`
+pub const AnonymousStruct: type = struct {
+    fields: []const NodeId,
+};
+
+// Anonymous structure field. Now it holds the field name and expression
+pub const AnStructField: type = struct {
+    name: NodeId,
+    expression: NodeId,
+};
+
+// Enum definition. This is equivalent to following code:
+// enum [name] {field1, field2, ...}
+pub const Enum = struct {
+    name: NodeId,
+    fields: []const NodeId, // This is a list of fields.
+};
+
+// enum field. Now it only holds the field name
+pub const EnumField: type = struct {
+    name: NodeId,
+};
+
 // Function definition. This is equivalent to the following code:
 // `fn name(arg1, arg2) { ... }`
 // Native functions are defined by NativeFunctionDecl.
@@ -136,6 +184,28 @@ pub const ForLoop = struct {
     body: NodeId,
 };
 
+pub const FunctionCall = struct {
+    name: NodeId,
+    arguments: []const NodeId,
+};
+
+pub const MemberAccess = struct {
+    target: NodeId, // This is the object being accessed
+    member: NodeId, // This is the member being accessed
+};
+
+pub const Conditional = struct {
+    condition: ?NodeId, // This is the condition being checked
+    body: NodeId, // This is the body of the conditional
+    else_conditional: ?NodeId = null, // This is the optional else if/else conditional
+};
+
+pub const InlineConditional = struct {
+    condition: NodeId, // This is the condition being checked
+    then_expr: NodeId, // This is the expression to evaluate if condition is true
+    else_expr: NodeId, // This is the expression to evaluate if condition is false
+};
+
 // Binary operator node. This is equivalent to the following code:
 // `left + right`
 pub const BinaryOperator = struct {
@@ -159,6 +229,7 @@ pub const Assignment = struct {
     value: NodeId, // Expression
 };
 
+// Expression group node. This is used to group expressions together.
 pub const ExpressionGroup = struct {
     expression: NodeId,
 };
