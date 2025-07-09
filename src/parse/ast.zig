@@ -25,11 +25,9 @@ pub const NodeKind = union(enum) {
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
-    function_call: FunctionCall,
-    member_access: MemberAccess,
     field: Field,
-    enumField: EnumField,
-    anStructField: AnStructField,
+    enum_field: EnumField,
+    struct_field: StructField,
 
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
@@ -50,12 +48,16 @@ pub const NodeKind = union(enum) {
     loop: Loop,
     while_loop: WhileLoop,
     for_loop: ForLoop,
-    structure: Struct,
-    enumeration: Enum,
-    anStruct: AnonymousStruct,
+    struct_def: Struct,
+    enum_def: Enum,
+    anon_struct: AnonymousStruct,
     conditional: Conditional,
 
     // ---< Expression nodes >---
+    function_call: FunctionCall,
+    member_access: MemberAccess,
+    array_literal: ArrayLiteral,
+    indexed_access: IndexedAccess,
 };
 
 pub const NodeId = usize;
@@ -112,7 +114,7 @@ pub const AnonymousStruct: type = struct {
 };
 
 // Anonymous structure field. Now it holds the field name and expression
-pub const AnStructField: type = struct {
+pub const StructField: type = struct {
     name: NodeId,
     expression: NodeId,
 };
@@ -190,20 +192,32 @@ pub const FunctionCall = struct {
 };
 
 pub const MemberAccess = struct {
-    target: NodeId, // This is the object being accessed
-    member: NodeId, // This is the member being accessed
+    target: NodeId, // This is the object being accessed.
+    member: NodeId, // This is the member being accessed.
+};
+
+// This is equivalent to `[a, b, c, ...d]`.
+pub const ArrayLiteral = struct {
+    elements: []const NodeId,
+    spread: ?NodeId,
+};
+
+// This is `target[index]`.
+pub const IndexedAccess = struct {
+    target: NodeId,
+    index: NodeId,
 };
 
 pub const Conditional = struct {
-    condition: ?NodeId, // This is the condition being checked
-    body: NodeId, // This is the body of the conditional
-    else_conditional: ?NodeId = null, // This is the optional else if/else conditional
+    condition: ?NodeId, // This is the condition being checked.
+    body: NodeId, // This is the body of the conditional.
+    else_conditional: ?NodeId = null, // This is the optional else if/else conditional.
 };
 
 pub const InlineConditional = struct {
-    condition: NodeId, // This is the condition being checked
-    then_expr: NodeId, // This is the expression to evaluate if condition is true
-    else_expr: NodeId, // This is the expression to evaluate if condition is false
+    condition: NodeId, // This is the condition being checked.
+    then_expr: NodeId, // This is the expression to evaluate if condition is true.
+    else_expr: NodeId, // This is the expression to evaluate if condition is false.
 };
 
 // Binary operator node. This is equivalent to the following code:
