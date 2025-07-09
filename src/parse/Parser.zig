@@ -1889,7 +1889,7 @@ test "Parse complex postfix expression" {
         .span = .{ .start = 0, .end = 15 },
         .kind = .{
             .function_call = .{
-                .name = 5, // member_access .ghi
+                .target = 5, // member_access .ghi
                 .arguments = &[_]usize{},
             },
         },
@@ -1939,7 +1939,7 @@ test "Parse complex postfix expression" {
         .span = .{ .start = 0, .end = 5 },
         .kind = .{
             .function_call = .{
-                .name = 0, // identifier abc
+                .target = 0, // identifier abc
                 .arguments = &[_]usize{},
             },
         },
