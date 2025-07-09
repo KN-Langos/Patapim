@@ -234,6 +234,8 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeEnumDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeBreakStatement()) |stmt| return stmt;
     if (try self.parseMaybeContinueStatement()) |stmt| return stmt;
+    // Temporary...
+    if (try self.parseMaybeExpressionStatement()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -252,10 +254,24 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     );
 }
 
+pub fn parseMaybeExpressionStatement(self: *Self) !?usize {
+    // Temporary implementation.
+    try self.pushSpanOnNextToken();
+    defer _ = self.popSpan();
+    const expr_id = try self.parseExpression();
+    _ = try self.expect(.SEMICOLON);
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .expr_stmt = expr_id },
+    });
+}
+
 //parse variable declaration statement and return its ID if parsed.
 // For more information please reference `ast.zig -> Variable` struct.
 pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
     if (try self.maybe(.KW_VARIABLE) == null) return null;
+    std.debug.print("VARIABLE \n", .{});
     try self.pushSpan();
     defer _ = self.popSpan();
     const var_name = try self.expectIdentifier();
@@ -913,7 +929,7 @@ pub fn parsePostfix(self: *Self, operand: usize) Self.Error!usize {
                 expr = try self.tree.addNode(.{
                     .span = self.peekSpan(),
                     .kind = .{ .function_call = .{
-                        .name = expr,
+                        .target = expr,
                         .arguments = try args.toOwnedSlice(),
                     } },
                 });
@@ -1928,7 +1944,7 @@ test "Parse complex postfix expression" {
         .span = .{ .start = 0, .end = 15 },
         .kind = .{
             .function_call = .{
-                .name = 5, // member_access .ghi
+                .target = 5, // member_access .ghi
                 .arguments = &[_]usize{},
             },
         },
@@ -1978,7 +1994,7 @@ test "Parse complex postfix expression" {
         .span = .{ .start = 0, .end = 5 },
         .kind = .{
             .function_call = .{
-                .name = 0, // identifier abc
+                .target = 0, // identifier abc
                 .arguments = &[_]usize{},
             },
         },
