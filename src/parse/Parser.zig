@@ -783,6 +783,9 @@ pub fn parseAtom(self: *Self) !usize {
 
             return iden;
         },
+        .KW_IF => {
+            return try self.parseInlineConditional();
+        },
         else => return self.reportError(
             "P003",
             "Expected an expression atom.",
@@ -901,6 +904,31 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
         .kind = .{ .expression_group = .{
             .expression = expr,
         } },
+    });
+}
+
+pub fn parseInlineConditional(self: *Self) Self.Error!usize {
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.LEFT_PAREN);
+    const condition = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const then_expr = try self.parseExpression();
+
+    _ = try self.expect(.KW_ELSE);
+    const else_expr = try self.parseExpression();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{
+            .inline_conditional = .{
+                .condition = condition,
+                .then_expr = then_expr,
+                .else_expr = else_expr,
+            },
+        },
     });
 }
 
@@ -1134,6 +1162,27 @@ test "Parse conditional statement chain" {
             },
         },
     }, else_node);
+}
+
+test "Parse inline conditional expression" {
+    const source = "if(x) 1 else 2";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = try parser.parseExpression();
+    const expr_node = parser.tree.getNodeUnsafe(expr_id);
+
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .inline_conditional = .{
+                .condition = 0, // index of node "x"
+                .then_expr = 1, // index of node 1
+                .else_expr = 2, // index of node 2
+            },
+        },
+    }, expr_node);
 }
 
 test "Parse code block" {
