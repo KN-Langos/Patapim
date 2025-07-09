@@ -47,6 +47,9 @@ pub const NodeKind = union(enum) {
     native_function_decl: NativeFunctionDecl,
     variable: Variable,
     constant: Const,
+    loop: Loop,
+    while_loop: WhileLoop,
+    for_loop: ForLoop,
     structure: Struct,
     enumeration: Enum,
     anStruct: AnonymousStruct,
@@ -159,6 +162,28 @@ pub const NativeParameter = struct {
     type: ?NodeId,
 };
 
+// Loop node. This is equivalent to the following code:
+// `loop { ... }`
+// This is a special node, because it has no condition.
+pub const Loop = struct {
+    body: NodeId,
+};
+
+// While loop node. This is equivalent to the following code:
+// `while(condition) { ... }`
+pub const WhileLoop = struct {
+    condition: NodeId,
+    body: NodeId,
+};
+
+// For loop node. This is equivalent to the following code:
+// `for (i in 0..10) { ... }`
+pub const ForLoop = struct {
+    binding: NodeId, // This is the variable that is bound to the loop.
+    iterable: NodeId, // This is the iterable that is being looped over.
+    body: NodeId,
+};
+
 pub const FunctionCall = struct {
     name: NodeId,
     arguments: []const NodeId,
@@ -247,6 +272,8 @@ pub const Operator = enum {
     // Increment/Decrement operators
     INCREMENT, // '++'
     DECREMENT, // '--'
+
+    RANGE, // '..' (used in for loops)
 
     UNKNOWN,
 };

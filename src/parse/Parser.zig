@@ -226,6 +226,9 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeNativeFunctionDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
+    if (try self.parseMaybeLoop()) |stmt| return stmt;
+    if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
+    if (try self.parseMaybeForLoop()) |stmt| return stmt;
     if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
     if (try self.parseMaybeStructStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
@@ -311,6 +314,7 @@ pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
         } },
     });
 }
+
 //parse struct declaration statement and return its ID if parsed
 // For more information please reference `ast.zig -> Structure` struct.
 pub fn parseMaybeStructStatement(self: *Self) !?usize {
@@ -570,6 +574,66 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
     });
 }
 
+// Parse maybe loop statement and return its ID if parsed.
+pub fn parseMaybeLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_LOOP) == null) return null; // This may not be a loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .loop = .{
+            .body = body,
+        } },
+    });
+}
+
+// Parse maybe while loop statement and return its ID if parsed.
+pub fn parseMaybeWhileLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_WHILE) == null) return null; // This may not be a while loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.LEFT_PAREN);
+    const condition = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .while_loop = .{
+            .condition = condition,
+            .body = body,
+        } },
+    });
+}
+
+pub fn parseMaybeForLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_FOR) == null) return null; // This may not be a for loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.LEFT_PAREN);
+    const binding = try self.expectIdentifier();
+    _ = try self.expect(.KW_IN);
+    const iterable = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .for_loop = .{
+            .binding = binding,
+            .iterable = iterable,
+            .body = body,
+        } },
+    });
+}
+
 // Parse function call or member access and return its ID if parsed.
 // For more information please reference `ast.zig -> FunctionCall` and `ast.zig -> MemberAccess` structs.
 pub fn parseMaybeCallOrAccess(self: *Self) !?usize {
@@ -713,6 +777,7 @@ pub fn parseBinaryExpression(self: *Self, precedence: u8) !usize {
                     .binary_operator = .{
                         .left = left,
                         .operator = switch (next.type) {
+                            .RANGE => .RANGE,
                             .MULTIPLY => .MULTIPLY,
                             .DIVIDE => .DIVIDE,
                             .MODULO => .MODULO,
@@ -934,6 +999,7 @@ pub fn parseInlineConditional(self: *Self) Self.Error!usize {
 
 pub fn getPrecedence(op: Token) u8 {
     switch (op.type) {
+        .RANGE => return 12,
         .MULTIPLY, .DIVIDE, .MODULO => return 11,
         .ADD, .SUBTRACT => return 10,
         .BITSHIFT_RIGHT, .BITSHIFT_LEFT => return 9,
@@ -1066,12 +1132,11 @@ test "Parse native function declaration statement" {
     }, fn_node);
 }
 
-test "Parse  struct Declaration type1" {
+test "Parse struct Declaration type" {
     const source = "struct foo {patapim, sahur, fn lorem (helloworld){}, };";
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
-
     const structure = (try parser.parseMaybeStructStatement()).?;
     const struct_node = parser.tree.getNodeUnsafe(structure);
     try std.testing.expectEqualDeep(ast.Node{
@@ -1100,7 +1165,7 @@ test "Parse anonymous struct Declaration type1" {
     }, struct_node);
 }
 
-test "Parse enum Declaration type1" {
+test "Parse enum Declaration type" {
     const source = "enum myEnum {PATAPIM, SAHUR, HELLO_WORLD,};";
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
@@ -1115,6 +1180,69 @@ test "Parse enum Declaration type1" {
             .fields = &.{ 2, 4, 6 },
         } },
     }, enum_node);
+}
+
+test "Parse simple loop statement" {
+    const source = "loop {}";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeLoop()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: loop
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .loop = .{
+                .body = 0,
+            },
+        },
+    }, expr_node);
+}
+
+test "Parse simple while loop statement" {
+    const source = "while(abc > 10) {}";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeWhileLoop()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: while_loop
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .while_loop = .{
+                .condition = 2,
+                .body = 3,
+            },
+        },
+    }, expr_node);
+}
+
+test "Parse simple for loop statement" {
+    const source = "for(i in 1 .. 10) {}";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeForLoop()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Root node: for_loop
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .for_loop = .{
+                .binding = 0,
+                .iterable = 3,
+                .body = 4,
+            },
+        },
+    }, expr_node);
 }
 
 test "Parse conditional statement chain" {
