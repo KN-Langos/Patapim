@@ -17,6 +17,22 @@ pub fn main() !void {
         \\import "another.brr" as another;
         \\fn hello(arg1, arg2) {}
         \\native "C" fn lorem(ipsum: int, dolor);
+        \\brr x = 1 + 2 * 2 + 4 % 5;
+        \\const y = [1, 2, ... 3..10];
+        \\struct Person {
+        \\    name, age,
+        \\    fn greet() { print("Hello, " + this.name + "!"); }
+        \\}
+        \\enum E { A, B, C }
+        \\if (a < b) { print(a); } else if (b < a) { print(b); } else {}
+        \\loop { print(1); }
+        \\while (a < b) { print(1); }
+        \\for(i in 0..5) { print(i); }
+        \\!a.b().c[1][2];
+        \\const x = Person { name: "Patapim", age: 321, };
+        \\const x = #{ name: "Patapim", age: 321, };
+        \\const y = if (x < z) true else false;
+        \\y = z;
     ;
     var lexer: patapim.Lexer = .{ .source = source };
     var parser = patapim.Parser.init(allocator, &lexer);

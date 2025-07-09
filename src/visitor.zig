@@ -38,7 +38,7 @@ pub fn Visitor(
                     const value = @field(node.kind, tag_name);
 
                     const Variant = @TypeOf(value);
-                    const visitee = Visitee(Tree, Variant, Self){
+                    const visitee = Visitee(Tree, Variant, Self, tag_name){
                         .value = value,
                         .impl = self,
                     };
@@ -60,6 +60,7 @@ pub fn Visitee(
     comptime Tree: type,
     comptime Variant: type,
     comptime VisitorType: type,
+    comptime tag_name: []const u8,
 ) type {
     const info = @typeInfo(Variant);
 
@@ -111,8 +112,13 @@ pub fn Visitee(
                         else => {},
                     }
                 },
+                .int => |int_t| {
+                    if (int_t.bits == 64 and comptime !std.mem.eql(u8, tag_name, "integer_literal")) {
+                        _ = try VisitorType.accept(@alignCast(@ptrCast(self.impl)), tree, self.value);
+                    }
+                },
                 else => {
-                    std.debug.print("Visitor: {any}\n", .{info});
+                    std.debug.print("Visitor: {any} on '{s}'\n", .{ info, tag_name });
                 },
             }
         }
