@@ -230,8 +230,8 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
     if (try self.parseMaybeForLoop()) |stmt| return stmt;
     if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
-    if (try self.parseMaybeStructStatement()) |stmt| return stmt;
-    if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
+    if (try self.parseMaybeStructDeclStatement()) |stmt| return stmt;
+    if (try self.parseMaybeEnumDeclStatement()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -259,18 +259,6 @@ pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
     const var_name = try self.expectIdentifier();
     _ = try self.expect(.ASSIGN);
 
-    const anonym_struct = try self.parseMaybeAnonymStructStatement();
-
-    if (anonym_struct != null) {
-        return try self.tree.addNode(.{
-            .span = self.peekSpan(),
-            .kind = .{ .variable = .{
-                .name = var_name,
-                .expression = anonym_struct.?,
-            } },
-        });
-    }
-
     const expression = try self.parseExpression();
     _ = try self.expect(.SEMICOLON);
     return try self.tree.addNode(.{
@@ -291,18 +279,6 @@ pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
     const const_name = try self.expectIdentifier();
     _ = try self.expect(.ASSIGN);
 
-    const anonym_struct = try self.parseMaybeAnonymStructStatement();
-
-    if (anonym_struct != null) {
-        return try self.tree.addNode(.{
-            .span = self.peekSpan(),
-            .kind = .{ .constant = .{
-                .name = const_name,
-                .expression = anonym_struct.?,
-            } },
-        });
-    }
-
     const expression = try self.parseExpression();
     _ = try self.expect(.SEMICOLON);
     return try self.tree.addNode(.{
@@ -315,124 +291,95 @@ pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
 }
 
 //parse struct declaration statement and return its ID if parsed
-// For more information please reference `ast.zig -> Structure` struct.
-pub fn parseMaybeStructStatement(self: *Self) !?usize {
+// For more information please reference `ast.zig -> StructDecl` struct.
+pub fn parseMaybeStructDeclStatement(self: *Self) !?usize {
     if (try self.maybe(.KW_STRUCT) == null) return null; // This may not be a struct statement.
-
     try self.pushSpan();
     defer _ = self.popSpan();
+
     const struct_name = try self.expectIdentifier();
-    _ = try self.expect(.LEFT_CURLY);
-    var fields = std.ArrayList(usize).init(self.tree.allocator());
-    errdefer fields.deinit(); // This may return error early.
-
-    while (try self.maybe(.RIGHT_CURLY) == null) {
-        const potential_function = try self.parseMaybeFunctionDefStatement();
-        if (potential_function != null) {
-            try fields.append(potential_function.?);
-        } else {
-            const field_name = try self.expectIdentifier();
-            try self.pushSpan();
-
-            const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .field = .{
-                .name = field_name,
-            } } });
-            try fields.append(field);
-            _ = self.popSpan();
-        }
-        if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
-            _ = try self.expect(.RIGHT_CURLY);
-            _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .struct_def = .{
-                .name = struct_name,
-                .fields = try fields.toOwnedSlice(),
-            } } });
-        }
-        if (try self.maybe(.RIGHT_CURLY) != null) {
-            _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .struct_def = .{
-                .name = struct_name,
-                .fields = try fields.toOwnedSlice(),
-            } } });
-        }
-    }
-    return error.ExpectedStatement; // maybe sth different here, in theory shouldn't reach
-}
-
-//parse anonymous struct declaration statement and return its ID if parsed
-// For more information please reference `ast.zig -> AnStruct` struct.
-// must be checked before variables not to cause issues with one another, because of the same KW at the start
-pub fn parseMaybeAnonymStructStatement(self: *Self) !?usize {
-    if (try self.maybe(.HASH) == null) return null;
 
     _ = try self.expect(.LEFT_CURLY);
     var fields = std.ArrayList(usize).init(self.tree.allocator());
     errdefer fields.deinit(); // This may return error early.
+    var decls = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer decls.deinit(); // This may return error early.
+
     while (try self.maybe(.RIGHT_CURLY) == null) {
+        // This might be a declaration.
+        if (try self.parseMaybeFunctionDefStatement()) |fn_def_stmt| {
+            try decls.append(fn_def_stmt);
+            continue;
+        }
+
+        // If not, then we assume this is a field
         const field_name = try self.expectIdentifier();
-        try self.pushSpan();
-        _ = try self.expect(.COLON);
-        const expression = try self.parseExpression();
-        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .struct_field = .{
-            .name = field_name,
-            .expression = expression,
-        } } });
-        try fields.append(field);
-        _ = self.popSpan();
+        try fields.append(field_name);
 
-        if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
+        // Or potentially exit.
+        if (try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
-            _ = try self.expect(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anon_struct = .{
-                .fields = try fields.toOwnedSlice(),
-            } } });
-        }
-        if (try self.maybe(.RIGHT_CURLY) != null) {
-            _ = try self.expect(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anon_struct = .{
-                .fields = try fields.toOwnedSlice(),
-            } } });
+            break;
         }
     }
-    return error.ExpectedStatement; // maybe sth different here, in theory shouldn't reach
+
+    // Structures may be followed by semicolon.
+    _ = try self.maybe(.SEMICOLON);
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .struct_decl = .{
+            .name = struct_name,
+            .fields = try fields.toOwnedSlice(),
+            .decls = try decls.toOwnedSlice(),
+        } },
+    });
 }
 
 //parse enum declaration statement and return its ID if parsed
-// For more information please reference `ast.zig -> Enum` struct.
-pub fn parseMaybeEnumStatement(self: *Self) !?usize {
-    if (try self.maybe(.KW_ENUM) == null) return null; // This may not be a enum statement.
+// For more information please reference `ast.zig -> EnumDecl` struct.
+pub fn parseMaybeEnumDeclStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_ENUM) == null) return null; // This may not be an enumeration statement.
     try self.pushSpan();
     defer _ = self.popSpan();
-    const enum_name = try self.expectIdentifier();
-    _ = try self.expect(.LEFT_CURLY);
-    var fields = std.ArrayList(usize).init(self.tree.allocator());
-    errdefer fields.deinit(); // This may return error early.
-    while (try self.maybe(.RIGHT_CURLY) == null) {
-        const field_name = try self.expectIdentifier();
-        try self.pushSpan();
 
-        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enum_field = .{
-            .name = field_name,
-        } } });
-        try fields.append(field);
-        _ = self.popSpan();
+    const struct_name = try self.expectIdentifier();
+
+    _ = try self.expect(.LEFT_CURLY);
+    var variants = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer variants.deinit(); // This may return error early.
+    var decls = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer decls.deinit(); // This may return error early.
+
+    while (try self.maybe(.RIGHT_CURLY) == null) {
+        // This might be a declaration.
+        if (try self.parseMaybeFunctionDefStatement()) |fn_def_stmt| {
+            try decls.append(fn_def_stmt);
+            continue;
+        }
+
+        // If not, then we assume this is a field
+        const variant_name = try self.expectIdentifier();
+        try variants.append(variant_name);
+
+        // Or potentially exit.
         if (try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
-            _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enum_def = .{
-                .name = enum_name,
-                .fields = try fields.toOwnedSlice(),
-            } } });
-        }
-        if (try self.maybe(.RIGHT_CURLY) != null) {
-            _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enum_def = .{
-                .name = enum_name,
-                .fields = try fields.toOwnedSlice(),
-            } } });
+            break;
         }
     }
-    return error.ExpectedStatement; // maybe sth different here, in theory shouldn't reach
+
+    // Enums may be followed by semicolon.
+    _ = try self.maybe(.SEMICOLON);
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .enum_decl = .{
+            .name = struct_name,
+            .variants = try variants.toOwnedSlice(),
+            .decls = try decls.toOwnedSlice(),
+        } },
+    });
 }
 
 // Parse import statement and return its ID if parsed.
@@ -819,6 +766,12 @@ pub fn parseAtom(self: *Self) !usize {
         .BANG, .BITWISE_NOT, .SUBTRACT => try self.parseUnaryOperator(token),
         .LEFT_PAREN => try self.parseParenthesizedExpr(),
         .LEFT_SQUARE => try self.parseArrayLiteral(),
+        .HASH => {
+            try self.pushSpan();
+            defer _ = self.popSpan();
+
+            return try self.parseStructLiteralBody(null);
+        },
         .IDENTIFIER => {
             try self.pushSpan();
             defer _ = self.popSpan();
@@ -829,7 +782,7 @@ pub fn parseAtom(self: *Self) !usize {
             });
 
             const next = try self.peek();
-            if (next.type == .INCREMENT or next.type == .DECREMENT or next.type == .DOT or next.type == .LEFT_PAREN or next.type == .LEFT_SQUARE) {
+            if (next.type == .INCREMENT or next.type == .DECREMENT or next.type == .DOT or next.type == .LEFT_PAREN or next.type == .LEFT_SQUARE or next.type == .LEFT_CURLY) {
                 // This is a function call or member access (or just incrementation/decrementation).
                 // We will handle it in a separate function.
                 return try self.parsePostfix(iden);
@@ -949,11 +902,51 @@ pub fn parsePostfix(self: *Self, operand: usize) Self.Error!usize {
                     } },
                 });
             },
+            .LEFT_CURLY => expr = try self.parseStructLiteralBody(expr),
             else => break,
         }
     }
 
     return expr;
+}
+
+// Parse structure literal body.
+// This assumes that span is pushed and popped by the caller.
+pub fn parseStructLiteralBody(self: *Self, target: ?usize) Self.Error!usize {
+    _ = try self.expect(.LEFT_CURLY);
+
+    var fields = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer fields.deinit();
+
+    while (try self.maybe(.RIGHT_CURLY) == null) {
+        const field_name = try self.expectIdentifier();
+        try self.pushSpan();
+        defer _ = self.popSpan();
+
+        _ = try self.expect(.COLON);
+        const field_value = try self.parseExpression();
+
+        try fields.append(try self.tree.addNode(.{
+            .span = self.peekSpan(),
+            .kind = .{ .field_def = .{
+                .name = field_name,
+                .value = field_value,
+            } },
+        }));
+
+        if (try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_CURLY); // If we break we need to check this.
+            break;
+        }
+    }
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .struct_literal = .{
+            .target = target,
+            .fields = try fields.toOwnedSlice(),
+        } },
+    });
 }
 
 pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
@@ -1164,54 +1157,82 @@ test "Parse native function declaration statement" {
     }, fn_node);
 }
 
-test "Parse struct Declaration type" {
-    const source = "struct foo {patapim, sahur, fn lorem (helloworld){}, };";
+test "Parse struct declaration statement" {
+    const source =
+        \\struct Foo {
+        \\    patapim, sahur,
+        \\    fn lorem(hello, world) {}
+        \\};
+    ;
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
-    const structure = (try parser.parseMaybeStructStatement()).?;
+    const structure = (try parser.parseMaybeStructDeclStatement()).?;
     const struct_node = parser.tree.getNodeUnsafe(structure);
     try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 0, .end = 55 },
-        .kind = .{ .struct_def = .{
+        .span = .{ .start = 0, .end = 65 },
+        .kind = .{ .struct_decl = .{
             .name = 0,
-            .fields = &.{ 2, 4, 9 },
+            .fields = &.{ 1, 2 },
+            .decls = &.{9},
         } },
     }, struct_node);
 }
 
-test "Parse anonymous struct Declaration type1" {
-    const source = "brr Patapim =  #{age: 32, bankAcc: 12345};";
+test "Parse enum declaration statement" {
+    const source =
+        \\enum Foo {
+        \\    PATAPIM, SAHUR, HELLO_WORLD,
+        \\};
+    ;
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
 
-    const structure = (try parser.parseMaybeVariableDeclaration()).?;
-    const struct_node = parser.tree.getNodeUnsafe(structure);
-    try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 0, .end = 42 },
-        .kind = .{ .variable = .{
-            .name = 0,
-            .expression = 7,
-        } },
-    }, struct_node);
-}
-
-test "Parse enum Declaration type" {
-    const source = "enum myEnum {PATAPIM, SAHUR, HELLO_WORLD,};";
-    var lexer: Lexer = .{ .source = source };
-    var parser = Self.init(std.testing.allocator, &lexer);
-    defer parser.deinit(true);
-
-    const enumeration = (try parser.parseMaybeEnumStatement()).?;
+    const enumeration = (try parser.parseMaybeEnumDeclStatement()).?;
     const enum_node = parser.tree.getNodeUnsafe(enumeration);
     try std.testing.expectEqualDeep(ast.Node{
-        .span = .{ .start = 0, .end = 43 },
-        .kind = .{ .enum_def = .{
+        .span = .{ .start = 0, .end = 46 },
+        .kind = .{ .enum_decl = .{
             .name = 0,
-            .fields = &.{ 2, 4, 6 },
+            .variants = &.{ 1, 2, 3 },
+            .decls = &.{},
         } },
     }, enum_node);
+}
+
+test "Parse struct literal expression" {
+    const source = "Person { name: \"Patapim\", age: 321, }";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const literal = try parser.parseExpression();
+    const struct_node = parser.tree.getNodeUnsafe(literal);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 37 },
+        .kind = .{ .struct_literal = .{
+            .target = 0,
+            .fields = &.{ 3, 6 },
+        } },
+    }, struct_node);
+}
+
+test "Parse anonymous struct literal expression" {
+    const source = "#{ name: \"Patapim\", age: 321, }";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const literal = try parser.parseExpression();
+    const struct_node = parser.tree.getNodeUnsafe(literal);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 31 },
+        .kind = .{ .struct_literal = .{
+            .target = null,
+            .fields = &.{ 2, 5 },
+        } },
+    }, struct_node);
 }
 
 test "Parse simple loop statement" {
