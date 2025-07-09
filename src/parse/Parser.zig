@@ -232,7 +232,6 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
     if (try self.parseMaybeStructStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
-    if (try self.parseMaybeCallOrAccess()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -344,14 +343,14 @@ pub fn parseMaybeStructStatement(self: *Self) !?usize {
         if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
             _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .struct_def = .{
                 .name = struct_name,
                 .fields = try fields.toOwnedSlice(),
             } } });
         }
         if (try self.maybe(.RIGHT_CURLY) != null) {
             _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .structure = .{
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .struct_def = .{
                 .name = struct_name,
                 .fields = try fields.toOwnedSlice(),
             } } });
@@ -374,7 +373,7 @@ pub fn parseMaybeAnonymStructStatement(self: *Self) !?usize {
         try self.pushSpan();
         _ = try self.expect(.COLON);
         const expression = try self.parseExpression();
-        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anStructField = .{
+        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .struct_field = .{
             .name = field_name,
             .expression = expression,
         } } });
@@ -384,13 +383,13 @@ pub fn parseMaybeAnonymStructStatement(self: *Self) !?usize {
         if (try self.maybe(.SEMICOLON) == null and try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
             _ = try self.expect(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anStruct = .{
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anon_struct = .{
                 .fields = try fields.toOwnedSlice(),
             } } });
         }
         if (try self.maybe(.RIGHT_CURLY) != null) {
             _ = try self.expect(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anStruct = .{
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .anon_struct = .{
                 .fields = try fields.toOwnedSlice(),
             } } });
         }
@@ -412,7 +411,7 @@ pub fn parseMaybeEnumStatement(self: *Self) !?usize {
         const field_name = try self.expectIdentifier();
         try self.pushSpan();
 
-        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enumField = .{
+        const field = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enum_field = .{
             .name = field_name,
         } } });
         try fields.append(field);
@@ -420,14 +419,14 @@ pub fn parseMaybeEnumStatement(self: *Self) !?usize {
         if (try self.maybe(.COMMA) == null) {
             _ = try self.expect(.RIGHT_CURLY);
             _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enumeration = .{
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enum_def = .{
                 .name = enum_name,
                 .fields = try fields.toOwnedSlice(),
             } } });
         }
         if (try self.maybe(.RIGHT_CURLY) != null) {
             _ = try self.maybe(.SEMICOLON);
-            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enumeration = .{
+            return try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .enum_def = .{
                 .name = enum_name,
                 .fields = try fields.toOwnedSlice(),
             } } });
@@ -634,17 +633,6 @@ pub fn parseMaybeForLoop(self: *Self) !?usize {
     });
 }
 
-// Parse function call or member access and return its ID if parsed.
-// For more information please reference `ast.zig -> FunctionCall` and `ast.zig -> MemberAccess` structs.
-pub fn parseMaybeCallOrAccess(self: *Self) !?usize {
-    if ((try self.peek()).type != .IDENTIFIER) return null; // This may not be a call or access.
-
-    const expr = try self.parseExpression();
-
-    _ = try self.expect(.SEMICOLON);
-    return expr;
-}
-
 // Parse conditional statement and return its ID if parsed.
 // For more information please reference `ast.zig -> Conditional` struct.
 pub fn parseMaybeConditionalStatement(self: *Self) !?usize {
@@ -830,6 +818,7 @@ pub fn parseAtom(self: *Self) !usize {
         }),
         .BANG, .BITWISE_NOT, .SUBTRACT => try self.parseUnaryOperator(token),
         .LEFT_PAREN => try self.parseParenthesizedExpr(),
+        .LEFT_SQUARE => try self.parseArrayLiteral(),
         .IDENTIFIER => {
             try self.pushSpan();
             defer _ = self.popSpan();
@@ -840,7 +829,7 @@ pub fn parseAtom(self: *Self) !usize {
             });
 
             const next = try self.peek();
-            if (next.type == .INCREMENT or next.type == .DECREMENT or next.type == .DOT or next.type == .LEFT_PAREN) {
+            if (next.type == .INCREMENT or next.type == .DECREMENT or next.type == .DOT or next.type == .LEFT_PAREN or next.type == .LEFT_SQUARE) {
                 // This is a function call or member access (or just incrementation/decrementation).
                 // We will handle it in a separate function.
                 return try self.parsePostfix(iden);
@@ -942,12 +931,22 @@ pub fn parsePostfix(self: *Self, operand: usize) Self.Error!usize {
 
                 expr = try self.tree.addNode(.{
                     .span = self.peekSpan(),
-                    .kind = .{
-                        .function_call = .{
-                            .name = expr,
-                            .arguments = try args.toOwnedSlice(),
-                        },
-                    },
+                    .kind = .{ .function_call = .{
+                        .name = expr,
+                        .arguments = try args.toOwnedSlice(),
+                    } },
+                });
+            },
+            .LEFT_SQUARE => {
+                _ = try self.expect(.LEFT_SQUARE);
+                const index = try self.parseExpression();
+                _ = try self.expect(.RIGHT_SQUARE);
+                expr = try self.tree.addNode(.{
+                    .span = self.peekSpan(),
+                    .kind = .{ .indexed_access = .{
+                        .target = expr,
+                        .index = index,
+                    } },
                 });
             },
             else => break,
@@ -968,6 +967,39 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
         .span = self.peekSpan(),
         .kind = .{ .expression_group = .{
             .expression = expr,
+        } },
+    });
+}
+
+pub fn parseArrayLiteral(self: *Self) Self.Error!usize {
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    var spread: ?usize = null;
+    var elements = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer elements.deinit();
+
+    while (try self.maybe(.RIGHT_SQUARE) == null) {
+        if (try self.maybe(.SPREAD) != null) {
+            spread = try self.parseExpression();
+            _ = try self.expect(.RIGHT_SQUARE);
+            break;
+        }
+
+        const expr = try self.parseExpression();
+        try elements.append(expr);
+
+        if (try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_SQUARE); // If we break we need to check this.
+            break;
+        }
+    }
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .array_literal = .{
+            .elements = try elements.toOwnedSlice(),
+            .spread = spread,
         } },
     });
 }
@@ -1141,7 +1173,7 @@ test "Parse struct Declaration type" {
     const struct_node = parser.tree.getNodeUnsafe(structure);
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 55 },
-        .kind = .{ .structure = .{
+        .kind = .{ .struct_def = .{
             .name = 0,
             .fields = &.{ 2, 4, 9 },
         } },
@@ -1175,7 +1207,7 @@ test "Parse enum Declaration type" {
     const enum_node = parser.tree.getNodeUnsafe(enumeration);
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 43 },
-        .kind = .{ .enumeration = .{
+        .kind = .{ .enum_def = .{
             .name = 0,
             .fields = &.{ 2, 4, 6 },
         } },
@@ -1729,13 +1761,59 @@ test "Parse assignment" {
     }, value_assign);
 }
 
+// This test is split up for readability and maintanance purposes.
+test "Parse indexed access postfix expression" {
+    const source = "a[1][2].b[3]";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = try parser.parseExpression();
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // postfix [3] on member_access .b
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 12 },
+        .kind = .{
+            .indexed_access = .{
+                .target = 6,
+                .index = 7,
+            },
+        },
+    }, expr_node);
+
+    // member_access .b applied to indexed_access [2]
+    const member_b = parser.tree.getNode(6).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 9 },
+        .kind = .{
+            .member_access = .{
+                .target = 4, // indexed_access [2]
+                .member = 5, // identifier b
+            },
+        },
+    }, member_b);
+
+    // indexed_access [2] applied to indexed_access [1]
+    const indexed_2 = parser.tree.getNode(4).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 7 },
+        .kind = .{
+            .indexed_access = .{
+                .target = 2, // indexed_access [1]
+                .index = 3, // indexed_access [2]
+            },
+        },
+    }, indexed_2);
+}
+
 test "Parse complex postfix expression" {
     const source = "abc().def.ghi().j++;";
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
 
-    const expr_id = (try parser.parseMaybeCallOrAccess()).?;
+    const expr_id = try parser.parseExpression();
     const expr_node = parser.tree.getNode(expr_id).?;
 
     // postfix ++ on member_access ( .j )
@@ -1836,4 +1914,39 @@ test "Parse complex postfix expression" {
         .span = .{ .start = 0, .end = 3 },
         .kind = .{ .identifier = "abc" },
     }, ident_abc);
+}
+
+test "Parse array literal expression" {
+    const source = "[1, 2, ...a] [1, 2,]";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = try parser.parseExpression();
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // Check amount of elements (should be 2) and non-null spread.
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 12 },
+        .kind = .{
+            .array_literal = .{
+                .elements = &.{ 0, 1 },
+                .spread = 2,
+            },
+        },
+    }, expr_node);
+
+    const expr_id_2 = try parser.parseExpression();
+    const expr_node_2 = parser.tree.getNode(expr_id_2).?;
+
+    // Check amount of elements (should be 2) and non-null spread.
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 13, .end = 20 },
+        .kind = .{
+            .array_literal = .{
+                .elements = &.{ 4, 5 },
+                .spread = null,
+            },
+        },
+    }, expr_node_2);
 }
