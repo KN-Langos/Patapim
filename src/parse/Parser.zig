@@ -232,6 +232,8 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
     if (try self.parseMaybeStructDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumDeclStatement()) |stmt| return stmt;
+    if (try self.parseMaybeBreakStatement()) |stmt| return stmt;
+    if (try self.parseMaybeContinueStatement()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -577,6 +579,32 @@ pub fn parseMaybeForLoop(self: *Self) !?usize {
             .iterable = iterable,
             .body = body,
         } },
+    });
+}
+
+// Parse maybe break statement and return its ID if parsed.
+pub fn parseMaybeBreakStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_BREAK) == null) return null; // This may not be a break statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.SEMICOLON);
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .break_stmt = {} },
+    });
+}
+
+// Parse maybe continue statement and return its ID if parsed.
+pub fn parseMaybeContinueStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_CONTINUE) == null) return null; // This may not be a continue statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    _ = try self.expect(.SEMICOLON);
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .continue_stmt = {} },
     });
 }
 
@@ -1296,6 +1324,33 @@ test "Parse simple for loop statement" {
             },
         },
     }, expr_node);
+}
+
+test "Parse break statement" {
+    const source = "break;continue;";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const break_id = (try parser.parseMaybeBreakStatement()).?;
+    const break_node = parser.tree.getNodeUnsafe(break_id);
+
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 6 },
+        .kind = .{
+            .break_stmt = {},
+        },
+    }, break_node);
+
+    const continue_id = (try parser.parseMaybeContinueStatement()).?;
+    const continue_node = parser.tree.getNodeUnsafe(continue_id);
+
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 6, .end = source.len },
+        .kind = .{
+            .continue_stmt = {},
+        },
+    }, continue_node);
 }
 
 test "Parse conditional statement chain" {
