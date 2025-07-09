@@ -232,6 +232,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
     if (try self.parseMaybeStructDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumDeclStatement()) |stmt| return stmt;
+    if (try self.parseMaybeReturnStatement()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -516,6 +517,30 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
             .abi = abi_node,
             .name = fn_name,
             .parameters = try fn_parameters.toOwnedSlice(),
+        } },
+    });
+}
+
+pub fn parseMaybeReturnStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_RETURN) == null) return null; // This may not be a return statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    var expression: ?usize = null;
+
+    if ((try self.peek()).type != .SEMICOLON) {
+        // If we do not have semicolon, we expect an expression.
+        expression = try self.parseExpression();
+        _ = try self.expect(.SEMICOLON);
+    } else {
+        // If we have semicolon, we do not return anything.
+        _ = try self.expect(.SEMICOLON);
+    }
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .return_stmt = .{
+            .value = expression,
         } },
     });
 }
@@ -1103,6 +1128,33 @@ test "Parse function definition statement" {
             .body = 5,
         } },
     }, fn_node);
+}
+
+test "Parse return statement" {
+    const source = "return 42; return;";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const return_value_id = (try parser.parseMaybeReturnStatement()).?;
+    const return_value_node = parser.tree.getNodeUnsafe(return_value_id);
+
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 10 },
+        .kind = .{ .return_stmt = .{
+            .value = 0,
+        } },
+    }, return_value_node);
+
+    const return_id = (try parser.parseMaybeReturnStatement()).?;
+    const return_node = parser.tree.getNodeUnsafe(return_id);
+
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 11, .end = 18 },
+        .kind = .{ .return_stmt = .{
+            .value = null,
+        } },
+    }, return_node);
 }
 
 test "Parse variable declaration statement" {
