@@ -226,6 +226,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeNativeFunctionDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeVariableDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
+    if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
     if (try self.parseMaybeStructStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
     if (try self.parseMaybeCallOrAccess()) |stmt| return stmt;
@@ -569,6 +570,8 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
     });
 }
 
+// Parse function call or member access and return its ID if parsed.
+// For more information please reference `ast.zig -> FunctionCall` and `ast.zig -> MemberAccess` structs.
 pub fn parseMaybeCallOrAccess(self: *Self) !?usize {
     if ((try self.peek()).type != .IDENTIFIER) return null; // This may not be a call or access.
 
@@ -576,6 +579,64 @@ pub fn parseMaybeCallOrAccess(self: *Self) !?usize {
 
     _ = try self.expect(.SEMICOLON);
     return expr;
+}
+
+// Parse conditional statement and return its ID if parsed.
+// For more information please reference `ast.zig -> Conditional` struct.
+pub fn parseMaybeConditionalStatement(self: *Self) !?usize {
+    if (try self.maybe(.KW_IF) == null) return null; // This may not be a conditional statement.
+    return try self.parseConditional(); // This is a recursive function, so it will handle the whole conditional tree.
+}
+
+fn parseConditional(self: *Self) !usize {
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    // Check if the next token is `if` keyword (in case of else if to get correct span).
+    if ((try self.peek()).type == .KW_IF) {
+        _ = try self.expect(.KW_IF);
+    }
+
+    _ = try self.expect(.LEFT_PAREN);
+    const condition = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+
+    const body = try self.parseCodeBlock();
+
+    var else_conditional: ?usize = null;
+
+    if (try self.maybe(.KW_ELSE) != null) {
+        if ((try self.peek()).type == .KW_IF) {
+            else_conditional = try self.parseConditional(); // This is a recursive call, so it will handle the whole else-if chain.
+        } else {
+            try self.pushSpan();
+            const else_body = try self.parseCodeBlock();
+
+            else_conditional = try self.tree.addNode(.{
+                .span = self.peekSpan(),
+                .kind = .{
+                    .conditional = .{
+                        .condition = null, // No condition for else block.
+                        .body = else_body,
+                        .else_conditional = null,
+                    },
+                },
+            });
+
+            _ = self.popSpan();
+        }
+    }
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{
+            .conditional = .{
+                .condition = condition,
+                .body = body,
+                .else_conditional = else_conditional,
+            },
+        },
+    });
 }
 
 // Parse block of code.
@@ -1026,6 +1087,53 @@ test "Parse enum Declaration type1" {
             .fields = &.{ 2, 4, 6 },
         } },
     }, enum_node);
+}
+
+test "Parse conditional statement chain" {
+    const source = "if (a) {} else if (b) {} else {}";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const if_id = (try parser.parseMaybeConditionalStatement()).?;
+    const if_node = parser.tree.getNodeUnsafe(if_id);
+
+    const expected = ast.Node{
+        .span = .{ .start = 0, .end = source.len },
+        .kind = .{
+            .conditional = .{
+                .condition = 0, // "a"
+                .body = 1, // "{}"
+                .else_conditional = 6, // points to the else-if conditional
+            },
+        },
+    };
+
+    try std.testing.expectEqualDeep(expected, if_node);
+
+    const else_if_node = parser.tree.getNodeUnsafe(6);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 10, .end = source.len },
+        .kind = .{
+            .conditional = .{
+                .condition = 2, // "b"
+                .body = 3, // "{}"
+                .else_conditional = 5, // final else
+            },
+        },
+    }, else_if_node);
+
+    const else_node = parser.tree.getNodeUnsafe(5);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 25, .end = source.len },
+        .kind = .{
+            .conditional = .{
+                .condition = null, // else block
+                .body = 4, // "{}"
+                .else_conditional = null,
+            },
+        },
+    }, else_node);
 }
 
 test "Parse code block" {
