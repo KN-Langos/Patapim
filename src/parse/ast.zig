@@ -25,9 +25,7 @@ pub const NodeKind = union(enum) {
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
-    field: Field,
-    enum_field: EnumField,
-    struct_field: StructField,
+    field_def: FieldDef,
 
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
@@ -48,16 +46,17 @@ pub const NodeKind = union(enum) {
     loop: Loop,
     while_loop: WhileLoop,
     for_loop: ForLoop,
-    struct_def: Struct,
-    enum_def: Enum,
-    anon_struct: AnonymousStruct,
+    struct_decl: StructDecl,
+    enum_decl: EnumDecl,
     conditional: Conditional,
+    expr_stmt: NodeId, // This is special statement wrapper for expressions as statements.
 
     // ---< Expression nodes >---
     function_call: FunctionCall,
     member_access: MemberAccess,
     array_literal: ArrayLiteral,
     indexed_access: IndexedAccess,
+    struct_literal: StructLiteral,
 };
 
 pub const NodeId = usize;
@@ -82,53 +81,46 @@ pub const Import = struct {
 };
 
 // Variable declaration. This is equivalent to the following code:
-// brr [var name] = [expression];
+// `brr [var name] = [expression];`
 pub const Variable = struct {
     name: NodeId,
     expression: NodeId,
 };
 
 //Const declaration. This is equivalent to the following code:
-//const [name] = [expression];
+//`const [name] = [expression];`
 pub const Const = struct {
     name: NodeId,
     expression: NodeId,
 };
 
 // Structure definition. This is equivalent to the following code:
-// struct [name] { field1, field2, ... }`
-pub const Struct = struct {
+// `struct [name] { field1, field2, ... }`
+pub const StructDecl = struct {
     name: NodeId,
     fields: []const NodeId, // This is a list of fields.
-};
-
-// Structure field. Now it only holds the field name
-pub const Field: type = struct {
-    name: NodeId,
-};
-
-//Anonymous structure definition. This is equivalent to the following code:
-//  brr [name] = #{ field1, field2, ... }`
-pub const AnonymousStruct: type = struct {
-    fields: []const NodeId,
-};
-
-// Anonymous structure field. Now it holds the field name and expression
-pub const StructField: type = struct {
-    name: NodeId,
-    expression: NodeId,
+    decls: []const NodeId, // This is a list of declarations.
 };
 
 // Enum definition. This is equivalent to following code:
-// enum [name] {field1, field2, ...}
-pub const Enum = struct {
+// `enum [name] {field1, field2, ...}`
+pub const EnumDecl = struct {
     name: NodeId,
-    fields: []const NodeId, // This is a list of fields.
+    variants: []const NodeId, // This is a list of enumeration variants.
+    decls: []const NodeId, // This is a list of declarations.
 };
 
-// enum field. Now it only holds the field name
-pub const EnumField: type = struct {
+// Field for structure literal.
+pub const FieldDef = struct {
     name: NodeId,
+    value: NodeId,
+};
+
+// Structure literal. This is equivalent to the following code:
+// `<target> { field1: value, field2: value }`
+pub const StructLiteral = struct {
+    target: ?NodeId, // If this is null, this is anonymous.
+    fields: []const NodeId,
 };
 
 // Function definition. This is equivalent to the following code:
