@@ -25,9 +25,12 @@ pub const NodeKind = union(enum) {
     parameter: Parameter,
     native_parameter: NativeParameter,
     code_block: []const NodeId,
+    function_call: FunctionCall,
+    member_access: MemberAccess,
     field: Field,
     enumField: EnumField,
     anStructField: AnStructField,
+    
     // --< Operator nodes >---
     binary_operator: BinaryOperator,
     unary_operator: UnaryOperator,
@@ -46,6 +49,7 @@ pub const NodeKind = union(enum) {
     structure: Struct,
     enumeration: Enum,
     anStruct: AnonymousStruct,
+    
     // ---< Expression nodes >---
 };
 
@@ -69,6 +73,7 @@ pub const Import = struct {
     source: NodeId,
     opt_rename: ?NodeId = null,
 };
+
 // Variable declaration. This is equivalent to the following code:
 // brr [var name] = [expression];
 pub const Variable = struct {
@@ -82,6 +87,7 @@ pub const Const = struct {
     name: NodeId,
     expression: NodeId,
 };
+
 // Structure definition. This is equivalent to the following code:
 // struct [name] { field1, field2, ... }`
 pub const Struct = struct {
@@ -93,11 +99,13 @@ pub const Struct = struct {
 pub const Field: type = struct {
     name: NodeId,
 };
+
 //Anonymous structure definition. This is equivalent to the following code:
 //  brr [name] = #{ field1, field2, ... }`
 pub const AnonymousStruct: type = struct {
     fields: []const NodeId,
 };
+
 // Anonymous structure field. Now it holds the field name and expression
 pub const AnStructField: type = struct {
     name: NodeId,
@@ -149,6 +157,16 @@ pub const NativeParameter = struct {
     type: ?NodeId,
 };
 
+pub const FunctionCall = struct {
+    name: NodeId,
+    arguments: []const NodeId,
+};
+
+pub const MemberAccess = struct {
+    target: NodeId, // This is the object being accessed
+    member: NodeId, // This is the member being accessed
+};
+
 // Binary operator node. This is equivalent to the following code:
 // `left + right`
 pub const BinaryOperator = struct {
@@ -172,6 +190,7 @@ pub const Assignment = struct {
     value: NodeId, // Expression
 };
 
+// Expression group node. This is used to group expressions together.
 pub const ExpressionGroup = struct {
     expression: NodeId,
 };

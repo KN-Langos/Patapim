@@ -228,6 +228,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeStructStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumStatement()) |stmt| return stmt;
+    if (try self.parseMaybeCallOrAccess()) |stmt| return stmt;
 
     // If nothing has returned up to this point, we assume that there
     // is no statement where it should be and panic.
@@ -277,6 +278,7 @@ pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
         } },
     });
 }
+
 // parse constant declaration statement and return its ID if parsed.
 // For more information please reference `ast.zig -> Const` struct.
 pub fn parseMaybeConstantDeclaration(self: *Self) !?usize {
@@ -567,6 +569,15 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
     });
 }
 
+pub fn parseMaybeCallOrAccess(self: *Self) !?usize {
+    if ((try self.peek()).type != .IDENTIFIER) return null; // This may not be a call or access.
+
+    const expr = try self.parseExpression();
+
+    _ = try self.expect(.SEMICOLON);
+    return expr;
+}
+
 // Parse block of code.
 // This is basically a statement list inside of `{}` parentheses.
 // This function assumes that caller has checked for `{` character already.
@@ -703,19 +714,10 @@ pub fn parseAtom(self: *Self) !usize {
             });
 
             const next = try self.peek();
-            if (next.type == .INCREMENT or next.type == .DECREMENT) {
-                _ = try self.expect(next.type);
-                return self.tree.addNode(.{
-                    .span = self.peekSpan(),
-                    .kind = .{ .unary_operator = .{
-                        .operand = iden,
-                        .operator = switch (next.type) {
-                            .INCREMENT => .INCREMENT,
-                            .DECREMENT => .DECREMENT,
-                            else => unreachable,
-                        },
-                    } },
-                });
+            if (next.type == .INCREMENT or next.type == .DECREMENT or next.type == .DOT or next.type == .LEFT_PAREN) {
+                // This is a function call or member access (or just incrementation/decrementation).
+                // We will handle it in a separate function.
+                return try self.parsePostfix(iden);
             }
 
             return iden;
@@ -754,6 +756,76 @@ pub fn parseUnaryOperator(self: *Self, operator_token: Token) Self.Error!usize {
             },
         },
     });
+}
+
+pub fn parsePostfix(self: *Self, operand: usize) Self.Error!usize {
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    var expr = operand;
+
+    while (true) {
+        const next = try self.peek();
+
+        switch (next.type) {
+            .INCREMENT, .DECREMENT => {
+                _ = try self.expect(next.type);
+                expr = try self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{
+                    .unary_operator = .{
+                        .operator = switch (next.type) {
+                            .INCREMENT => .INCREMENT,
+                            .DECREMENT => .DECREMENT,
+                            else => unreachable,
+                        },
+                        .operand = expr,
+                    },
+                } });
+                break;
+            },
+            .DOT => {
+                _ = try self.expect(.DOT);
+
+                const member = try self.expectIdentifier();
+
+                expr = try self.tree.addNode(.{
+                    .span = self.peekSpan(),
+                    .kind = .{
+                        .member_access = .{
+                            .target = expr,
+                            .member = member,
+                        },
+                    },
+                });
+            },
+            .LEFT_PAREN => {
+                _ = try self.expect(.LEFT_PAREN);
+                var args = std.ArrayList(usize).init(self.tree.allocator());
+                errdefer args.deinit(); // This may fail early.
+
+                while (try self.maybe(.RIGHT_PAREN) == null) {
+                    const arg = try self.parseExpression();
+                    try args.append(arg);
+                    if (try self.maybe(.COMMA) == null) {
+                        _ = try self.expect(.RIGHT_PAREN); // If we break we need to check this.
+                        break;
+                    }
+                }
+
+                expr = try self.tree.addNode(.{
+                    .span = self.peekSpan(),
+                    .kind = .{
+                        .function_call = .{
+                            .name = expr,
+                            .arguments = try args.toOwnedSlice(),
+                        },
+                    },
+                });
+            },
+            else => break,
+        }
+    }
+
+    return expr;
 }
 
 pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
@@ -1370,4 +1442,113 @@ test "Parse assignment" {
         .span = .{ .start = 9, .end = 10 },
         .kind = .{ .integer_literal = 2 },
     }, value_assign);
+}
+
+test "Parse complex postfix expression" {
+    const source = "abc().def.ghi().j++;";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const expr_id = (try parser.parseMaybeCallOrAccess()).?;
+    const expr_node = parser.tree.getNode(expr_id).?;
+
+    // postfix ++ on member_access ( .j )
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 19 },
+        .kind = .{
+            .unary_operator = .{
+                .operator = .INCREMENT,
+                .operand = 8, // member_access .j
+            },
+        },
+    }, expr_node);
+
+    // member_access .j applied to function_call ghi()
+    const member_j = parser.tree.getNode(8).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 17 },
+        .kind = .{
+            .member_access = .{
+                .target = 6, // function_call ghi()
+                .member = 7, // identifier j
+            },
+        },
+    }, member_j);
+
+    // identifier j
+    const ident_j = parser.tree.getNode(7).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 16, .end = 17 },
+        .kind = .{ .identifier = "j" },
+    }, ident_j);
+
+    // function_call ghi()
+    const func_ghi = parser.tree.getNode(6).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 15 },
+        .kind = .{
+            .function_call = .{
+                .name = 5, // member_access .ghi
+                .arguments = &[_]usize{},
+            },
+        },
+    }, func_ghi);
+
+    // member_access .ghi applied to member_access .def
+    const member_ghi = parser.tree.getNode(5).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 13 },
+        .kind = .{
+            .member_access = .{
+                .target = 3, // member_access .def
+                .member = 4, // identifier ghi
+            },
+        },
+    }, member_ghi);
+
+    // identifier ghi
+    const ident_ghi = parser.tree.getNode(4).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 10, .end = 13 },
+        .kind = .{ .identifier = "ghi" },
+    }, ident_ghi);
+
+    // member_access .def applied to function_call abc()
+    const member_def = parser.tree.getNode(3).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 9 },
+        .kind = .{
+            .member_access = .{
+                .target = 1, // function_call abc()
+                .member = 2, // identifier def
+            },
+        },
+    }, member_def);
+
+    // identifier def
+    const ident_def = parser.tree.getNode(2).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 6, .end = 9 },
+        .kind = .{ .identifier = "def" },
+    }, ident_def);
+
+    // function_call abc()
+    const func_abc = parser.tree.getNode(1).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 5 },
+        .kind = .{
+            .function_call = .{
+                .name = 0, // identifier abc
+                .arguments = &[_]usize{},
+            },
+        },
+    }, func_abc);
+
+    // identifier abc
+    const ident_abc = parser.tree.getNode(0).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 3 },
+        .kind = .{ .identifier = "abc" },
+    }, ident_abc);
 }
