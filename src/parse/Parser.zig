@@ -1023,6 +1023,11 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
     defer _ = self.popSpan();
 
     const expr = try self.parseExpression();
+
+    if (try self.maybe(.COMMA) != null) {
+        return try parseTuple(self, expr);
+    }
+
     _ = try self.expect(.RIGHT_PAREN);
 
     return self.tree.addNode(.{
@@ -1031,6 +1036,32 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
             .expression = expr,
         } },
     });
+}
+
+pub fn parseTuple(self: *Self, first_expression: usize) Self.Error!usize {
+    var expressions = std.ArrayList(usize).init(self.tree.allocator());
+    errdefer expressions.deinit();
+
+    try expressions.append(first_expression);
+
+    while (try self.maybe(.RIGHT_PAREN) == null) {
+        const expression = try self.parseExpression();
+
+        try expressions.append(expression);
+
+        if (try self.maybe(.COMMA) == null) {
+            _ = try self.expect(.RIGHT_PAREN);
+            break;
+        }
+
+        if (try self.maybe(.RIGHT_PAREN) != null) {
+            break;
+        }
+    }
+
+    return self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .tuple = .{
+        .expressions = try expressions.toOwnedSlice(),
+    } } });
 }
 
 pub fn parseArrayLiteral(self: *Self) Self.Error!usize {
@@ -1312,6 +1343,53 @@ test "Parse struct literal expression" {
             .fields = &.{ 4, 7 },
         } },
     }, struct_node);
+}
+
+test "Parse tuples (single)" {
+    const source = "(a,)";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const tuple = try parser.parseExpression();
+    const tuple_node = parser.tree.getNodeUnsafe(tuple);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 4 },
+        .kind = .{ .tuple = .{
+            .expressions = &.{0},
+        } },
+    }, tuple_node);
+}
+
+test "Parse tuples (multiple)" {
+    const source = "(a,b,c)";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const tuple = try parser.parseExpression();
+    const tuple_node = parser.tree.getNodeUnsafe(tuple);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 7 },
+        .kind = .{ .tuple = .{
+            .expressions = &.{ 0, 1, 2 },
+        } },
+    }, tuple_node);
+}
+test "Parse tuples (multiple with inside tuple)" {
+    const source = "(a,b,(c,d),)";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const tuple = try parser.parseExpression();
+    const tuple_node = parser.tree.getNodeUnsafe(tuple);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 12 },
+        .kind = .{ .tuple = .{
+            .expressions = &.{ 0, 1, 4 },
+        } },
+    }, tuple_node);
 }
 
 test "Parse anonymous struct literal expression" {

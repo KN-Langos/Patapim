@@ -62,6 +62,7 @@ pub const NodeKind = union(enum) {
     indexed_access: IndexedAccess,
     struct_literal: StructLiteral,
     variable_ref: NodeId,
+    tuple: Tuple,
 };
 
 // ---< AST Nodes begin >---
@@ -96,6 +97,12 @@ pub const Variable = struct {
 pub const Const = struct {
     name: NodeId,
     expression: NodeId,
+};
+
+//Tuple structure, this is equivalent to the following code:
+//
+pub const Tuple: type = struct {
+    expressions: []const NodeId,
 };
 
 // Structure definition. This is equivalent to the following code:
