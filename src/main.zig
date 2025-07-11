@@ -39,13 +39,15 @@ pub fn main() !void {
     //     \\y = z;
     // ;
 
-    // ---< Name Resolution Test >---
-    const source =
-        \\const x = add(1, 1);
-        \\const y = Person { age: x };
-        \\struct Person { age };
-        \\fn add(a, b) { return a + b; }
-    ;
+    // // ---< Name Resolution Test >---
+    // const source =
+    //     \\const x = add(1, 1);
+    //     \\const y = Person { age: x };
+    //     \\struct Person { age };
+    //     \\fn add(a, b) { return a + b; }
+    // ;
+
+    const source = "-2 == 8 * 4 / (2 + abc++) || a > ~b + 3;";
 
     var lexer: patapim.Lexer = .{ .source = source };
     var parser = patapim.Parser.init(allocator, &lexer);
@@ -60,17 +62,17 @@ pub fn main() !void {
     };
     try printer.accept(&parser.tree, module);
 
-    std.debug.print("\n\n---< Analysis >---\n\n", .{});
-    var metadata = try patapim.analysis.Metadata.init(allocator, &parser.tree);
-    defer metadata.deinit();
+    // std.debug.print("\n\n---< Analysis >---\n\n", .{});
+    // var metadata = try patapim.analysis.Metadata.init(allocator, &parser.tree);
+    // defer metadata.deinit();
 
-    var item_name_binding_pass = patapim.analysis.ItemNameBindingPass{
-        .metadata = &metadata,
-    };
-    try item_name_binding_pass.accept(&parser.tree, module);
+    // var item_name_binding_pass = patapim.analysis.ItemNameBindingPass{
+    //     .metadata = &metadata,
+    // };
+    // try item_name_binding_pass.accept(&parser.tree, module);
 
-    var name_resolution_pass = patapim.analysis.NameResolutionPass{
-        .metadata = &metadata,
-    };
-    try name_resolution_pass.accept(&parser.tree, module);
+    // var name_resolution_pass = patapim.analysis.NameResolutionPass{
+    //     .metadata = &metadata,
+    // };
+    // try name_resolution_pass.accept(&parser.tree, module);
 }

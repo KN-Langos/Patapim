@@ -272,7 +272,6 @@ pub fn parseMaybeExpressionStatement(self: *Self) !?usize {
 // For more information please reference `ast.zig -> Variable` struct.
 pub fn parseMaybeVariableDeclaration(self: *Self) !?usize {
     if (try self.maybe(.KW_VARIABLE) == null) return null;
-    std.debug.print("VARIABLE \n", .{});
     try self.pushSpan();
     defer _ = self.popSpan();
     const var_name = try self.expectIdentifier();
@@ -1309,8 +1308,8 @@ test "Parse struct literal expression" {
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 37 },
         .kind = .{ .struct_literal = .{
-            .target = 0,
-            .fields = &.{ 3, 6 },
+            .target = 1,
+            .fields = &.{ 4, 7 },
         } },
     }, struct_node);
 }
@@ -1366,8 +1365,8 @@ test "Parse simple while loop statement" {
         .span = .{ .start = 0, .end = source.len },
         .kind = .{
             .while_loop = .{
-                .condition = 2,
-                .body = 3,
+                .condition = 3,
+                .body = 4,
             },
         },
     }, expr_node);
@@ -1435,34 +1434,34 @@ test "Parse conditional statement chain" {
         .span = .{ .start = 0, .end = source.len },
         .kind = .{
             .conditional = .{
-                .condition = 0, // "a"
-                .body = 1, // "{}"
-                .else_conditional = 6, // points to the else-if conditional
+                .condition = 1, // "a"
+                .body = 2, // "{}"
+                .else_conditional = 8, // points to the else-if conditional
             },
         },
     };
 
     try std.testing.expectEqualDeep(expected, if_node);
 
-    const else_if_node = parser.tree.getNodeUnsafe(6);
+    const else_if_node = parser.tree.getNodeUnsafe(8);
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 10, .end = source.len },
         .kind = .{
             .conditional = .{
-                .condition = 2, // "b"
-                .body = 3, // "{}"
-                .else_conditional = 5, // final else
+                .condition = 4, // "b"
+                .body = 5, // "{}"
+                .else_conditional = 7, // final else
             },
         },
     }, else_if_node);
 
-    const else_node = parser.tree.getNodeUnsafe(5);
+    const else_node = parser.tree.getNodeUnsafe(7);
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 25, .end = source.len },
         .kind = .{
             .conditional = .{
                 .condition = null, // else block
-                .body = 4, // "{}"
+                .body = 6, // "{}"
                 .else_conditional = null,
             },
         },
@@ -1482,9 +1481,9 @@ test "Parse inline conditional expression" {
         .span = .{ .start = 0, .end = source.len },
         .kind = .{
             .inline_conditional = .{
-                .condition = 0, // index of node "x"
-                .then_expr = 1, // index of node 1
-                .else_expr = 2, // index of node 2
+                .condition = 1, // index of node "x"
+                .then_expr = 2, // index of node 1
+                .else_expr = 3, // index of node 2
             },
         },
     }, expr_node);
@@ -1640,17 +1639,17 @@ test "Parse complex expression with operators" {
     // 5: integer_literal 2
     // 6: identifier "abc"
     // 7: unary_operator abc++
-    // 8: brackets (2 + abc++)
-    // 9: binary_operator 2 + abc++
-    //10: binary_operator (8*4) / (2 + abc++)
-    //11: binary_operator (-2) == (...)
-    //12: identifier "a"
-    //13: identifier "b"
-    //14: unary_operator ~b
-    //15: integer_literal 3
-    //16: binary_operator (~b) + 3
-    //17: binary_operator a > (...)
-    //18: binary_operator (...) || (...)
+    // 8: binary_operator 2 + abc++
+    // 9: brackets (2 + abc++)
+    // 10: binary_operator (8*4) / (2 + abc++)
+    // 11: binary_operator (-2) == (...)
+    // 12: identifier "a"
+    // 13: unary_operator ~b
+    // 14: identifier "b"
+    // 15: binary_operator (~b) + 3
+    // 16: integer_literal 3
+    // 17: binary_operator a > (...)
+    // 18: binary_operator (...) || (...)
 
     //
     // Now we validate from the top down:
@@ -1661,35 +1660,35 @@ test "Parse complex expression with operators" {
         .span = .{ .start = 0, .end = source.len },
         .kind = .{
             .binary_operator = .{
-                .left = 11,
+                .left = 12,
                 .operator = .LOGICAL_OR,
-                .right = 17,
+                .right = 20,
             },
         },
     }, expr_node);
 
     // Left of OR: ==
-    const eq_node = parser.tree.getNode(11).?;
+    const eq_node = parser.tree.getNode(12).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 25 },
         .kind = .{
             .binary_operator = .{
                 .left = 1,
                 .operator = .EQ_EQ,
-                .right = 10,
+                .right = 11,
             },
         },
     }, eq_node);
 
     // Right of OR: >
-    const gt_node = parser.tree.getNode(17).?;
+    const gt_node = parser.tree.getNode(20).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 29, .end = 39 },
         .kind = .{
             .binary_operator = .{
-                .left = 12,
+                .left = 14,
                 .operator = .GREATER_THAN,
-                .right = 16,
+                .right = 19,
             },
         },
     }, gt_node);
@@ -1714,14 +1713,14 @@ test "Parse complex expression with operators" {
     }, lit2);
 
     // Right operand of ==
-    const div_node = parser.tree.getNode(10).?;
+    const div_node = parser.tree.getNode(11).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 6, .end = 25 },
         .kind = .{
             .binary_operator = .{
                 .left = 4,
                 .operator = .DIVIDE,
-                .right = 9,
+                .right = 10,
             },
         },
     }, div_node);
@@ -1754,24 +1753,24 @@ test "Parse complex expression with operators" {
     }, lit4);
 
     // (2 + abc++)
-    const plus_node_in_brackets = parser.tree.getNode(9).?;
+    const plus_node_in_brackets = parser.tree.getNode(10).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 14, .end = 25 },
         .kind = .{
             .expression_group = .{
-                .expression = 8,
+                .expression = 9,
             },
         },
     }, plus_node_in_brackets);
 
-    const plus_node = parser.tree.getNode(8).?;
+    const plus_node = parser.tree.getNode(9).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 15, .end = 24 },
         .kind = .{
             .binary_operator = .{
                 .left = 5,
                 .operator = .ADD,
-                .right = 7,
+                .right = 8,
             },
         },
     }, plus_node);
@@ -1784,13 +1783,13 @@ test "Parse complex expression with operators" {
     }, lit2b);
 
     // abc++
-    const inc_node = parser.tree.getNode(7).?;
+    const inc_node = parser.tree.getNode(8).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 19, .end = 24 },
         .kind = .{
             .unary_operator = .{
                 .operator = .INCREMENT,
-                .operand = 6,
+                .operand = 7,
             },
         },
     }, inc_node);
@@ -1803,46 +1802,46 @@ test "Parse complex expression with operators" {
     }, id_abc);
 
     // Left of >: a
-    const id_a = parser.tree.getNode(12).?;
+    const id_a = parser.tree.getNode(13).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 29, .end = 30 },
         .kind = .{ .identifier = "a" },
     }, id_a);
 
     // (~b) + 3
-    const plus_b3 = parser.tree.getNode(16).?;
+    const plus_b3 = parser.tree.getNode(19).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 33, .end = 39 },
         .kind = .{
             .binary_operator = .{
-                .left = 14,
+                .left = 17,
                 .operator = .ADD,
-                .right = 15,
+                .right = 18,
             },
         },
     }, plus_b3);
 
     // ~b
-    const not_b = parser.tree.getNode(14).?;
+    const not_b = parser.tree.getNode(17).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 33, .end = 35 },
         .kind = .{
             .unary_operator = .{
                 .operator = .BITWISE_NOT,
-                .operand = 13,
+                .operand = 16,
             },
         },
     }, not_b);
 
     // identifier b
-    const id_b = parser.tree.getNode(13).?;
+    const id_b = parser.tree.getNode(15).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 34, .end = 35 },
         .kind = .{ .identifier = "b" },
     }, id_b);
 
     // 3 literal
-    const lit3 = parser.tree.getNode(15).?;
+    const lit3 = parser.tree.getNode(18).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 38, .end = 39 },
         .kind = .{ .integer_literal = 3 },
@@ -1865,8 +1864,8 @@ test "Parse assignment" {
         .kind = .{
             .assignment = .{
                 .operator = .ADD_ASSIGN,
-                .target = 0,
-                .value = 3,
+                .target = 1,
+                .value = 5,
             },
         },
     }, expr_node);
@@ -1879,27 +1878,27 @@ test "Parse assignment" {
     }, target_add_assign);
 
     // value of '+=': assignment '='
-    const value_add_assign = parser.tree.getNode(3).?;
+    const value_add_assign = parser.tree.getNode(5).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 5, .end = 10 },
         .kind = .{
             .assignment = .{
                 .operator = .ASSIGN,
-                .target = 1,
-                .value = 2,
+                .target = 3,
+                .value = 4,
             },
         },
     }, value_add_assign);
 
     // target of '=': identifier 'b'
-    const target_assign = parser.tree.getNode(1).?;
+    const target_assign = parser.tree.getNode(2).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 5, .end = 6 },
         .kind = .{ .identifier = "b" },
     }, target_assign);
 
     // value of '=': integer literal 2
-    const value_assign = parser.tree.getNode(2).?;
+    const value_assign = parser.tree.getNode(4).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 9, .end = 10 },
         .kind = .{ .integer_literal = 2 },
@@ -1921,32 +1920,32 @@ test "Parse indexed access postfix expression" {
         .span = .{ .start = 0, .end = 12 },
         .kind = .{
             .indexed_access = .{
-                .target = 6,
-                .index = 7,
+                .target = 7,
+                .index = 8,
             },
         },
     }, expr_node);
 
     // member_access .b applied to indexed_access [2]
-    const member_b = parser.tree.getNode(6).?;
+    const member_b = parser.tree.getNode(7).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 9 },
         .kind = .{
             .member_access = .{
-                .target = 4, // indexed_access [2]
-                .member = 5, // identifier b
+                .target = 5, // indexed_access [2]
+                .member = 6, // identifier b
             },
         },
     }, member_b);
 
     // indexed_access [2] applied to indexed_access [1]
-    const indexed_2 = parser.tree.getNode(4).?;
+    const indexed_2 = parser.tree.getNode(5).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 7 },
         .kind = .{
             .indexed_access = .{
-                .target = 2, // indexed_access [1]
-                .index = 3, // indexed_access [2]
+                .target = 3, // indexed_access [1]
+                .index = 4, // indexed_access [2]
             },
         },
     }, indexed_2);
@@ -1967,87 +1966,87 @@ test "Parse complex postfix expression" {
         .kind = .{
             .unary_operator = .{
                 .operator = .INCREMENT,
-                .operand = 8, // member_access .j
+                .operand = 9, // member_access .j
             },
         },
     }, expr_node);
 
     // member_access .j applied to function_call ghi()
-    const member_j = parser.tree.getNode(8).?;
+    const member_j = parser.tree.getNode(9).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 17 },
         .kind = .{
             .member_access = .{
-                .target = 6, // function_call ghi()
-                .member = 7, // identifier j
+                .target = 7, // function_call ghi()
+                .member = 8, // identifier j
             },
         },
     }, member_j);
 
     // identifier j
-    const ident_j = parser.tree.getNode(7).?;
+    const ident_j = parser.tree.getNode(8).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 16, .end = 17 },
         .kind = .{ .identifier = "j" },
     }, ident_j);
 
     // function_call ghi()
-    const func_ghi = parser.tree.getNode(6).?;
+    const func_ghi = parser.tree.getNode(7).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 15 },
         .kind = .{
             .function_call = .{
-                .target = 5, // member_access .ghi
+                .target = 6, // member_access .ghi
                 .arguments = &[_]usize{},
             },
         },
     }, func_ghi);
 
     // member_access .ghi applied to member_access .def
-    const member_ghi = parser.tree.getNode(5).?;
+    const member_ghi = parser.tree.getNode(6).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 13 },
         .kind = .{
             .member_access = .{
-                .target = 3, // member_access .def
-                .member = 4, // identifier ghi
+                .target = 4, // member_access .def
+                .member = 5, // identifier ghi
             },
         },
     }, member_ghi);
 
     // identifier ghi
-    const ident_ghi = parser.tree.getNode(4).?;
+    const ident_ghi = parser.tree.getNode(5).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 10, .end = 13 },
         .kind = .{ .identifier = "ghi" },
     }, ident_ghi);
 
     // member_access .def applied to function_call abc()
-    const member_def = parser.tree.getNode(3).?;
+    const member_def = parser.tree.getNode(4).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 9 },
         .kind = .{
             .member_access = .{
-                .target = 1, // function_call abc()
-                .member = 2, // identifier def
+                .target = 2, // function_call abc()
+                .member = 3, // identifier def
             },
         },
     }, member_def);
 
     // identifier def
-    const ident_def = parser.tree.getNode(2).?;
+    const ident_def = parser.tree.getNode(3).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 6, .end = 9 },
         .kind = .{ .identifier = "def" },
     }, ident_def);
 
     // function_call abc()
-    const func_abc = parser.tree.getNode(1).?;
+    const func_abc = parser.tree.getNode(2).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 5 },
         .kind = .{
             .function_call = .{
-                .target = 0, // identifier abc
+                .target = 1, // identifier abc
                 .arguments = &[_]usize{},
             },
         },
@@ -2076,7 +2075,7 @@ test "Parse array literal expression" {
         .kind = .{
             .array_literal = .{
                 .elements = &.{ 0, 1 },
-                .spread = 2,
+                .spread = 3,
             },
         },
     }, expr_node);
@@ -2089,7 +2088,7 @@ test "Parse array literal expression" {
         .span = .{ .start = 13, .end = 20 },
         .kind = .{
             .array_literal = .{
-                .elements = &.{ 4, 5 },
+                .elements = &.{ 5, 6 },
                 .spread = null,
             },
         },
