@@ -41,6 +41,7 @@ pub const NodeKind = union(enum) {
     import: Import,
     function_def: FunctionDef,
     native_function_decl: NativeFunctionDecl,
+    return_stmt: ReturnStatement,
     variable: Variable,
     constant: Const,
     loop: Loop,
@@ -156,6 +157,12 @@ pub const NativeFunctionDecl = struct {
 pub const NativeParameter = struct {
     name: NodeId,
     type: ?NodeId,
+};
+
+// This is a return statement. This is equivalent to the following code:
+// `return [expression];`
+pub const ReturnStatement = struct {
+    value: ?NodeId, // This is the expression being returned.
 };
 
 // Loop node. This is equivalent to the following code:

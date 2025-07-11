@@ -165,6 +165,19 @@ pub fn visitNativeFunctionDecl(self: *Self, tree: *const ast.Tree, span: common.
     try self.writer.writeAll(")\n");
 }
 
+pub fn visitReturnStmt(self: *Self, tree: *const ast.Tree, span: common.Span, ret: ast.ReturnStatement, visitee: anytype) !void {
+    _ = visitee;
+
+    try self.writeIndent();
+    try self.writer.print("{}return", .{ansi.Style{ .foreground = .{ .basic = .yellow } }});
+    try self.writeSpan(span);
+    if (ret.value) |value| {
+        try self.writer.writeByte(' ');
+        try self.accept(tree, value);
+    }
+    try self.writer.writeByte('\n');
+}
+
 pub fn visitNativeParameter(self: *Self, tree: *const ast.Tree, span: common.Span, param: ast.NativeParameter, visitee: anytype) !void {
     _ = span;
     _ = visitee;
@@ -298,6 +311,7 @@ pub fn visitEnumDecl(self: *Self, tree: *const ast.Tree, span: common.Span, decl
     try self.writeIndent();
     try self.writer.writeAll("}\n");
 }
+
 pub fn visitExprStmt(self: *Self, tree: *const ast.Tree, span: common.Span, expr: usize, visitee: anytype) !void {
     _ = visitee;
     _ = span;
