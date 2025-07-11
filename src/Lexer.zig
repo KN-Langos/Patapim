@@ -1,0 +1,1012 @@
+//! Main implementation of the Patapim lexer.
+//! This file is responsible for generation of so called tokens from source files.
+
+const std = @import("std");
+
+const reportz = @import("reportz");
+
+const common = @import("common.zig");
+
+// Start index of the current token.
+// This is used for generation of proper spans.
+start: usize = 0,
+// Current index when parsing tokens.
+// Often the end of token span.
+current: usize = 0,
+// ID of the source being scanned.
+// This defaults to "internal<lexer>".
+source_id: []const u8 = "internal<lexer>",
+// Slice of source code.
+source: []const u8,
+
+// Error that this lexer produced.
+// Lexer should only produce one error before failing the compilation
+diagnostic: ?reportz.reports.Diagnostic = null,
+
+const Self = @This();
+const LOG = std.log.scoped(.lexer);
+
+pub const Error = error{
+    InvalidToken,
+    UnterminatedMultilineComment,
+    InvalidNumberLiteral,
+    InvalidCharacterLiteral,
+    UnterminatedStringLiteral,
+    UnterminatedCharacterLiteral,
+    InvalidEscapeSequence,
+} || std.mem.Allocator.Error;
+
+pub const LiteralValue = union(enum) {
+    none: void,
+    integer: u64,
+    float: f64,
+    char: u8,
+    string: []const u8,
+};
+
+pub const Token = struct {
+    type: TokenType,
+    span: common.Span,
+    // Lexeme is a slice of source code that produced this token.
+    lexeme: []const u8,
+    literal: LiteralValue = .none,
+};
+
+pub const KEYWORD_MAP: std.StaticStringMap(TokenType) = .initComptime(.{
+    .{ "import", .KW_IMPORT },
+    .{ "as", .KW_AS },
+    .{ "struct", .KW_STRUCT },
+    .{ "enum", .KW_ENUM },
+    .{ "true", .KW_TRUE },
+    .{ "false", .KW_FALSE },
+    .{ "if", .KW_IF },
+    .{ "else", .KW_ELSE },
+    .{ "return", .KW_RETURN },
+    .{ "error", .KW_ERROR },
+    .{ "loop", .KW_LOOP },
+    .{ "while", .KW_WHILE },
+    .{ "do", .KW_DO },
+    .{ "for", .KW_FOR },
+    .{ "break", .KW_BREAK },
+    .{ "continue", .KW_CONTINUE },
+    .{ "in", .KW_IN },
+    .{ "fn", .KW_FUNCTION },
+    .{ "brr", .KW_VARIABLE },
+    .{ "const", .KW_CONST },
+    .{ "native", .KW_NATIVE },
+    .{ "iserror", .KW_ISERROR },
+});
+
+pub const TokenType = enum {
+    // Parentheses:
+    LEFT_PAREN, // '('
+    RIGHT_PAREN, // ')'
+    LEFT_CURLY, // '{'
+    RIGHT_CURLY, // '}'
+    LEFT_SQUARE, // '['
+    RIGHT_SQUARE, // ']'
+
+    //Boolean operators
+    EQ_EQ, // '=='
+    NOT_EQ, // '!='
+    LESS_THAN, // '<'
+    GREATER_THAN, // '>'
+    LESS_EQUAL, // '<='
+    GREATER_EQUAL, // '>='
+
+    //Logical and Bitwise Operators
+    BANG, // '!'
+    BITWISE_NOT, // '~'
+    BITWISE_OR, // '|'
+    BITWISE_AND, // '&'
+    BITWISE_XOR, // '^'
+    LOGICAL_AND, // 'and' || '&&'
+    LOGICAL_OR, // 'or' || '||'
+    BITSHIFT_LEFT, // '<<'
+    BITSHIFT_RIGHT, // '>>'
+
+    //Assignment variants (bitwise operators)
+    BITWISE_OR_ASSIGN, //'|='
+    BITWISE_AND_ASSIGN, // '&='
+    BITWISE_XOR_ASSIGN, // '^='
+    ASSIGN, // '='
+
+    //Math operators
+    ADD, // '+'
+    SUBTRACT, // '-'
+    DIVIDE, // '/'
+    MULTIPLY, // '*'
+    MODULO, // '%'
+
+    //Assigment variants ( math )
+    ADD_ASSIGN, // '+='
+    SUB_ASSIGN, // '-='
+    MUL_ASSIGN, // '*='
+    DIV_ASSIGN, // '/='
+    MOD_ASSIGN, // '%='
+    INCREMENT, // '++'
+    DECREMENT, // '--'
+
+    //Special Symbols ( to do )
+    SEMICOLON, //';'
+    COLON, // ':'
+    DOT, // '.'
+    COMMA, // ','
+    RANGE, // '..'
+    SPREAD, // '...'
+    ARROW, // '->'
+    AT, // '@'
+    HASH, // '#'
+    QUESTION, // '?'
+    DOLLAR, // '$'
+
+    // Keywords:
+    KW_IMPORT,
+    KW_AS,
+    KW_STRUCT,
+    KW_ENUM,
+    KW_TRUE,
+    KW_FALSE,
+    KW_IF,
+    KW_ELSE,
+    KW_RETURN,
+    KW_ERROR,
+    KW_LOOP,
+    KW_WHILE,
+    KW_DO,
+    KW_FOR,
+    KW_BREAK,
+    KW_CONTINUE,
+    KW_IN,
+    KW_FUNCTION,
+    KW_VARIABLE,
+    KW_CONST,
+    KW_NATIVE,
+    KW_ISERROR,
+
+    // Special tokens:
+    INTEGER_LITERAL,
+    FLOAT_LITERAL,
+    CHAR_LITERAL,
+    STRING_LITERAL,
+    IDENTIFIER,
+    EOF, // End of file.
+};
+
+// Internal method for reporting error diagnostics.
+// This should be called in place of `error.*` whenever returning any errors.
+// Please examine the code below to get more details on usage before implementing new features.
+fn reportError(self: *Self, code: []const u8, message: []const u8, error_type: Self.Error) Self.Error {
+    // This tells the compiler this function is unlikely to be called.
+    @branchHint(.cold);
+
+    self.diagnostic = reportz.reports.Diagnostic{
+        .source_id = self.source_id,
+        .severity = .@"error",
+        .code = code,
+        .message = message,
+        .labels = &.{
+            reportz.reports.Label{
+                .color = .{ .basic = .magenta },
+                .message = "During scanning of this token.",
+                .span = .{ .start = self.start, .end = self.current },
+            },
+        },
+    };
+
+    return error_type;
+}
+
+// Check whether lexer has reached the end of source being scanned.
+pub inline fn isAtEnd(self: *Self) bool {
+    return self.current >= self.source.len;
+}
+
+// Generate next token. This function neither allocates nor stores the token.
+// Peeking functionality is implemented in the parser.
+// We wanted to avoid using allocator here, but string literals require it.
+pub fn next(self: *Self, allocator: std.mem.Allocator) Self.Error!Token {
+    const eof = Token{
+        .type = .EOF,
+        // EOF span has no length. It starts and ends at the end of source code.
+        .span = .{ .start = self.source.len, .end = self.source.len },
+        .lexeme = self.source[self.source.len..self.source.len],
+    };
+
+    if (self.isAtEnd()) return eof;
+    try self.skipWhitespaceAndComments();
+    self.start = self.current; // Update start index after comments and ws.
+    if (self.isAtEnd()) return eof;
+
+    const char = self.source[self.current];
+    var literal_value: LiteralValue = .none;
+
+    // Match token with predefined list.
+    const token_type = switch (char) {
+        '(' => .LEFT_PAREN,
+        ')' => .RIGHT_PAREN,
+        '{' => .LEFT_CURLY,
+        '}' => .RIGHT_CURLY,
+        '[' => .LEFT_SQUARE,
+        ']' => .RIGHT_SQUARE,
+        ';' => .SEMICOLON,
+        ':' => .COLON,
+        '@' => .AT,
+        '#' => .HASH,
+        '?' => .QUESTION,
+        '$' => .DOLLAR,
+        ',' => .COMMA,
+        '~' => .BITWISE_NOT,
+
+        '.' => self.lexDots(),
+
+        '!', '*', '+', '-', '<', '=', '>', '/', '^', '&', '%', '|' => self.lexOperators(),
+        'A'...'Z', 'a'...'z', '_' => self.lexIdentifierOrKW(),
+        '0'...'9' => try self.lexNumber(&literal_value),
+        '\'' => try self.lexCharacter(&literal_value),
+        '"' => try self.lexString(allocator, &literal_value),
+        else => return error.InvalidToken,
+    };
+
+    // Generate token, update lexer state, and return.
+    self.current += 1;
+    const result_token = Token{
+        .type = token_type,
+        .span = .{ .start = self.start, .end = self.current },
+        .lexeme = self.source[self.start..self.current],
+        .literal = literal_value,
+    };
+    self.start = self.current;
+    LOG.debug("Generated token '{any}'@{d}:{d} - \"{s}\" ({any})", .{
+        token_type,
+        result_token.span.start,
+        result_token.span.end,
+        result_token.lexeme,
+        result_token.literal,
+    });
+    return result_token;
+}
+
+// start with one dot, check if any more, return equivalent Token
+fn lexDots(self: *Self) TokenType {
+    var secondChar: u8 = 0;
+    var thirdChar: u8 = 0;
+
+    self.current += 1;
+    if (!self.isAtEnd()) {
+        secondChar = self.source[self.current];
+        self.current += 1;
+        if (!self.isAtEnd()) {
+            thirdChar = self.source[self.current];
+        }
+    }
+
+    if (secondChar == '.') {
+        if (thirdChar == '.') {
+            return .SPREAD;
+        }
+        self.current -= 1;
+        return .RANGE;
+    }
+    self.current -= 2;
+    return .DOT;
+}
+
+//get char associated with operators, lex and return equivalent Token from 1 or 2 char operators
+fn lexOperators(self: *Self) TokenType {
+    const char1: u8 = self.source[self.current];
+    self.current += 1;
+    var char2: u8 = 0;
+    if (!self.isAtEnd()) {
+        char2 = self.source[self.current];
+    }
+
+    switch (char1) {
+        '<' => switch (char2) {
+            '=' => return .LESS_EQUAL,
+            '<' => return .BITSHIFT_LEFT,
+            else => {
+                self.current -= 1;
+                return .LESS_THAN;
+            },
+        },
+        '>' => switch (char2) {
+            '=' => return .GREATER_EQUAL,
+            '>' => return .BITSHIFT_RIGHT,
+            else => {
+                self.current -= 1;
+                return .GREATER_THAN;
+            },
+        },
+
+        '!' => switch (char2) {
+            '=' => return .NOT_EQ,
+            else => {
+                self.current -= 1;
+                return .BANG;
+            },
+        },
+        '=' => switch (char2) {
+            '=' => return .EQ_EQ,
+            else => {
+                self.current -= 1;
+                return .ASSIGN;
+            },
+        },
+        '|' => switch (char2) {
+            '=' => return .BITWISE_OR_ASSIGN,
+            '|' => return .LOGICAL_OR,
+            else => {
+                self.current -= 1;
+                return .BITWISE_OR;
+            },
+        },
+        '&' => switch (char2) {
+            '=' => return .BITWISE_AND_ASSIGN,
+            '&' => return .LOGICAL_AND,
+            else => {
+                self.current -= 1;
+                return .BITWISE_AND;
+            },
+        },
+        '^' => switch (char2) {
+            '=' => return .BITWISE_XOR_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .BITWISE_XOR;
+            },
+        },
+        '+' => switch (char2) {
+            '=' => return .ADD_ASSIGN,
+            '+' => return .INCREMENT,
+            else => {
+                self.current -= 1;
+                return .ADD;
+            },
+        },
+        '-' => switch (char2) {
+            '=' => return .SUB_ASSIGN,
+            '-' => return .DECREMENT,
+            '>' => return .ARROW, // implement it here for simplicity
+            else => {
+                self.current -= 1;
+                return .SUBTRACT;
+            },
+        },
+        '*' => switch (char2) {
+            '=' => return .MUL_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .MULTIPLY;
+            },
+        },
+        '/' => switch (char2) {
+            '=' => return .DIV_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .DIVIDE;
+            },
+        },
+        '%' => switch (char2) {
+            '=' => return .MOD_ASSIGN,
+            else => {
+                self.current -= 1;
+                return .MODULO;
+            },
+        },
+
+        else => unreachable,
+    }
+}
+
+// Lex any identifier or keyword.
+// This function parses an identifier and then attempts to match
+// it against known keyword map.
+fn lexIdentifierOrKW(self: *Self) TokenType {
+    // Parse until end of identifier.
+    var char = self.source[self.current];
+    while (!self.isAtEnd() and std.ascii.isAlphanumeric(char) or char == '-' or char == '_') {
+        self.current += 1;
+        if (!self.isAtEnd()) char = self.source[self.current];
+    }
+
+    // If exists in keyword map, return matching token.
+    const lexeme = self.source[self.start..self.current];
+    self.current -= 1; // ".next()" function advances current, so we roll back one.
+    if (KEYWORD_MAP.get(lexeme)) |kw_token|
+        return kw_token;
+
+    // If not, return identifier token type.
+    return TokenType.IDENTIFIER;
+}
+
+// Lex any number.
+// This function parses an number and then attempts to match
+// it as integer or float.
+// This implementation is still missing support for exponential notation,
+// but it can be extended in the future.
+fn lexNumber(self: *Self, literal_value: *LiteralValue) !TokenType {
+    // Make space for clean number buffer.
+    var clean_buffer: [128]u8 = undefined;
+    var clean_len: usize = 0;
+
+    var is_float: bool = false;
+    var is_scientific: bool = false;
+    var last_char_is_digit: bool = true;
+    var base: u8 = 10; // Default base is decimal.
+
+    // Parse until end of number.
+    var char = self.source[self.current];
+
+    if (!self.isAtEnd() and char == '0') {
+        const next_char = if (!self.isAtEnd()) self.source[self.current + 1] else '?';
+        self.current += 2; // Skip '0' and next character.
+        switch (next_char) {
+            'b', 'B' => {
+                base = 2; // Binary.
+                if (self.isAtEnd()) return self.reportError("L06", "Invalid number literal. Expected binary number after '0b'.", error.InvalidNumberLiteral);
+                char = self.source[self.current];
+            },
+            'o', 'O' => {
+                base = 8; // Octal.
+                if (self.isAtEnd()) return self.reportError("L07", "Invalid number literal. Expected octal number after '0o'.", error.InvalidNumberLiteral);
+                char = self.source[self.current];
+            },
+            'x', 'X' => {
+                base = 16; // Hexadecimal.
+                if (self.isAtEnd()) return self.reportError("L08", "Invalid number literal. Expected hexadecimal number after '0x'.", error.InvalidNumberLiteral);
+                char = self.source[self.current];
+            },
+            else => {
+                self.current -= 2; // Roll back to '0'.
+            },
+        }
+    }
+
+    while (!self.isAtEnd()) {
+        if (isValidDigitForBase(char, base)) {
+            clean_buffer[clean_len] = char;
+            clean_len += 1;
+            last_char_is_digit = true;
+        } else if (char == '_') {
+            if (!(std.ascii.isDigit(self.source[self.current - 1]) and !self.isAtEnd() and std.ascii.isDigit(self.source[self.current + 1]))) {
+                // If '_' is not between digits, this is not a valid number.
+                return self.reportError("L11", "Underscore in numeric literal must be between digits.", error.InvalidNumberLiteral);
+            }
+
+            last_char_is_digit = false;
+        } else if (char == '.') {
+            if (!self.isAtEnd()) {
+                const dot_char = self.source[self.current + 1];
+
+                if (dot_char == '.') {
+                    break; // This is a range operator, not a float.
+                }
+            }
+
+            // If we already have a dot, this is not a valid number.
+            if (is_float) return self.reportError("L02", "Floating number has multiple dots.", error.InvalidNumberLiteral);
+
+            // If we have a dot after 'e' or 'E', this is not a valid number.
+            if (is_scientific) return self.reportError("L9", "Floating point numbers in scientific notation are not supported.", error.InvalidNumberLiteral);
+
+            // If we have a dot, it must be in decimal numbers.
+            if (base != 10) return self.reportError("L10", "Floating point numbers are only supported in decimal base.", error.InvalidNumberLiteral);
+
+            clean_buffer[clean_len] = char;
+            clean_len += 1;
+            last_char_is_digit = false;
+            is_float = true;
+        } else if (char == 'e' or char == 'E') {
+            clean_buffer[clean_len] = char;
+            clean_len += 1;
+            // Check if next character is '+' or '-'.
+            const next_char = if (!self.isAtEnd()) self.source[self.current + 1] else '?';
+            self.current += 2; // Skip 'e' and next character.
+
+            switch (next_char) {
+                '+' => {},
+                '-' => {
+                    clean_buffer[clean_len] = next_char;
+                    clean_len += 1;
+                },
+                else => {
+                    self.current -= 1; // Roll back to char after 'e'.
+                },
+            }
+
+            self.current -= 1; // Roll back to 'e'.
+            is_scientific = true;
+            is_float = true;
+            last_char_is_digit = false;
+        } else {
+            break; // End of number.
+        }
+
+        self.current += 1;
+        if (!self.isAtEnd()) char = self.source[self.current];
+    }
+
+    // If last character is not a digit, this is not a valid number.
+    if (!last_char_is_digit) return self.reportError("L03", "Last character in numeric literal must be a digit.", error.InvalidNumberLiteral);
+
+    const cleaned_str = clean_buffer[0..clean_len];
+    self.current -= 1; // ".next()" function advances current, so we roll back one.
+
+    if (is_float) {
+        // If we have a float, parse it as float.
+        // If it fails, it means that the number is not valid.
+        const parsed_float = std.fmt.parseFloat(f64, cleaned_str) catch |err| {
+            LOG.err("Error while calling parseFloat(...). This should not occur! Error message: {any}", .{err});
+            return self.reportError("L04", "Invalid number literal. If you see this please open an issue on github.", error.InvalidNumberLiteral);
+        };
+
+        // Return float token type and modify literal value.
+        literal_value.* = .{ .float = parsed_float };
+        return TokenType.FLOAT_LITERAL;
+    }
+
+    // Else parse the number as integer.
+    // If it fails, it means that the number is not valid.
+    const parsed_int = std.fmt.parseInt(u64, cleaned_str, base) catch |err| {
+        LOG.err("Error while calling parseInt(...). This should not occur! Error message: {any}", .{err});
+        return self.reportError("L05", "Invalid number literal. If you see this please open an issue on github.", error.InvalidNumberLiteral);
+    };
+
+    // Return integer token type and modify literal value.
+    literal_value.* = .{ .integer = parsed_int };
+    return TokenType.INTEGER_LITERAL;
+}
+
+fn isValidDigitForBase(c: u8, base: u8) bool {
+    // Check if character is a valid digit for given base.
+    // For bases 2, 8, 10, and 16.
+    return switch (base) {
+        2 => c == '0' or c == '1',
+        8 => c >= '0' and c <= '7',
+        10 => c >= '0' and c <= '9',
+        16 => (c >= '0' and c <= '9') or (c >= 'A' and c <= 'F') or (c >= 'a' and c <= 'f'),
+        else => false, // Invalid base.
+    };
+}
+
+// Lex character literal. Character literals are single ascii characters
+// inside of `'' characters.
+fn lexCharacter(self: *Self, literal_value: *LiteralValue) Self.Error!TokenType {
+    self.current += 1; // This is only called after `'` is detected.
+    if (self.isAtEnd())
+        return self.reportError("L10", "Unexpected EOF in character literal.", error.InvalidCharacterLiteral);
+    const char = self.source[self.current];
+    const char_literal = if (char == '\\')
+        try self.unescapeSequence()
+    else
+        char;
+    literal_value.* = .{ .char = char_literal };
+    self.current += 1;
+    if (self.isAtEnd())
+        return self.reportError("L10", "Unexpected EOF in character literal.", error.InvalidCharacterLiteral);
+    if (self.source[self.current] != '\'')
+        return self.reportError("L12", "Unexpected EOF in character literal.", error.UnterminatedCharacterLiteral);
+    return TokenType.CHAR_LITERAL;
+}
+
+// Lex string literal. Character literals are everything delimited by `"` characters.
+fn lexString(self: *Self, allocator: std.mem.Allocator, literal_value: *LiteralValue) Self.Error!TokenType {
+    self.current += 1; // This is only called after `"` is detected.
+    if (self.isAtEnd())
+        return self.reportError("L13", "Unterminated string literal", error.UnterminatedStringLiteral);
+
+    var string_value = std.ArrayList(u8).init(allocator);
+    // This function may fail early, in such case we should deinit to avoid leaks.
+    errdefer string_value.deinit();
+
+    var char = self.source[self.current];
+    while (char != '"') {
+        try string_value.append(if (char == '\\')
+            try self.unescapeSequence()
+        else
+            char);
+        self.current += 1;
+        if (self.isAtEnd()) {
+            return self.reportError("L13", "Unterminated string literal", error.UnterminatedStringLiteral);
+        }
+        char = self.source[self.current];
+    }
+
+    literal_value.* = .{ .string = try string_value.toOwnedSlice() };
+    return TokenType.STRING_LITERAL;
+}
+
+fn unescapeSequence(self: *Self) !u8 {
+    if (self.source[self.current] != '\\')
+        @panic("unescapeSequence method should never be called before checking '\\' character.");
+    self.current += 1;
+    if (self.isAtEnd())
+        return self.reportError("L11", "Unexpected EOF in escape sequence.", error.InvalidEscapeSequence);
+    const char = self.source[self.current];
+    return blk: switch (char) {
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        '\\' => '\\',
+        '\'' => '\'',
+        '"' => '"',
+        'x' => {
+            // This is `\xNN`, where NN is one byte in hexadecimal.
+            // TODO: Parse this while properly checking validity of hex number.
+            break :blk '#'; // I needed to put something here.
+        },
+        else => return self.reportError("L12", "Unknown escape sequence.", error.InvalidEscapeSequence),
+    };
+}
+
+fn skipWhitespaceAndComments(self: *Self) !void {
+    while (self.skipWhitespace() or try self.skipComment()) {
+        // This will skip both.
+    }
+}
+
+fn skipComment(self: *Self) !bool {
+    if (self.isAtEnd()) return false; // Is this necessary? Maybe better to be safe.
+    var char = self.source[self.current];
+    var maybe_next = if (self.current + 1 < self.source.len)
+        self.source[self.current + 1]
+    else
+        null;
+    var has_skipped = false;
+
+    // This is expensive. But runs only for comments so It should be fine.
+    if (!self.isAtEnd() and char == '/' and (maybe_next == '/' or maybe_next == '*')) {
+        has_skipped = true;
+        if (maybe_next == '/') { // Single-line comments
+            while (!self.isAtEnd() and char != '\n') {
+                self.current += 1;
+                if (!self.isAtEnd()) char = self.source[self.current];
+            }
+        } else { // Multi-line comments
+            // Technically with this /*/ is a comment, but it seems unlikely to be an issue.
+            while (char != '*' or maybe_next != '/') {
+                self.current += 1;
+                if (!self.isAtEnd()) {
+                    char = self.source[self.current];
+                    maybe_next = if (self.current + 1 < self.source.len)
+                        self.source[self.current + 1]
+                    else
+                        null;
+                } else {
+                    return self.reportError("L01", "Unterminated multiline comment.", error.UnterminatedMultilineComment);
+                }
+            }
+            self.current += 2; // Skip '*/'
+        }
+    }
+
+    return has_skipped;
+}
+
+fn skipWhitespace(self: *Self) bool {
+    if (self.isAtEnd()) return false; // Is this necessary? Maybe better to be safe.
+    var char = self.source[self.current];
+    var has_skipped = false;
+    while (!self.isAtEnd() and std.ascii.isWhitespace(char)) {
+        has_skipped = true;
+        self.current += 1;
+        if (!self.isAtEnd()) char = self.source[self.current];
+    }
+    return has_skipped;
+}
+
+test "Lex single character tokens" {
+    const source = "(){}[];:@#?$";
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    for ([_]TokenType{
+        .LEFT_PAREN,
+        .RIGHT_PAREN,
+        .LEFT_CURLY,
+        .RIGHT_CURLY,
+        .LEFT_SQUARE,
+        .RIGHT_SQUARE,
+        .SEMICOLON,
+        .COLON,
+        .AT,
+        .HASH,
+        .QUESTION,
+        .DOLLAR,
+    }, 0..) |expected_token_type, idx| {
+        const expected_token = Token{
+            .type = expected_token_type,
+            .span = .{ .start = idx, .end = idx + 1 },
+            .lexeme = source[idx .. idx + 1],
+        };
+        try std.testing.expectEqualDeep(expected_token, try lexer.next(alloc));
+    }
+}
+
+test "Lex keywords and identifiers" {
+    const source = "simple with_underscore import";
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .IDENTIFIER,
+        .span = .{ .start = 0, .end = 6 },
+        .lexeme = "simple",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .IDENTIFIER,
+        .span = .{ .start = 7, .end = 22 },
+        .lexeme = "with_underscore",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .KW_IMPORT,
+        .span = .{ .start = 23, .end = 29 },
+        .lexeme = "import",
+    }, try lexer.next(alloc));
+}
+
+test "Lex numbers" {
+    const source = "123 4_567_890 42.321 0b1010 0o67 0x1F4 0 14E4 14e-2 14e+2 14.14e2";
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 0, .end = 3 },
+        .lexeme = "123",
+        .literal = .{ .integer = 123 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 4, .end = 13 },
+        .lexeme = "4_567_890",
+        .literal = .{ .integer = 4567890 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 14, .end = 20 },
+        .lexeme = "42.321",
+        .literal = .{ .float = 42.321 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 21, .end = 27 },
+        .lexeme = "0b1010",
+        .literal = .{ .integer = 10 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 28, .end = 32 },
+        .lexeme = "0o67",
+        .literal = .{ .integer = 55 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 33, .end = 38 },
+        .lexeme = "0x1F4",
+        .literal = .{ .integer = 500 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 39, .end = 40 },
+        .lexeme = "0",
+        .literal = .{ .integer = 0 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 41, .end = 45 },
+        .lexeme = "14E4",
+        .literal = .{ .float = 140000 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 46, .end = 51 },
+        .lexeme = "14e-2",
+        .literal = .{ .float = 0.14 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 52, .end = 57 },
+        .lexeme = "14e+2",
+        .literal = .{ .float = 1400 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .FLOAT_LITERAL,
+        .span = .{ .start = 58, .end = 65 },
+        .lexeme = "14.14e2",
+        .literal = .{ .float = 1414 },
+    }, try lexer.next(alloc));
+}
+
+test "Lex character and string literals" {
+    const source =
+        \\ 'a' '\n'
+        \\ "Hello" "Hello world" "Lorem\nIpsum"
+    ;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    var lexer = Self{ .source = source };
+    defer arena.deinit();
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .CHAR_LITERAL,
+        .span = .{ .start = 1, .end = 4 },
+        .lexeme = "'a'",
+        .literal = .{ .char = 'a' },
+    }, try lexer.next(arena.allocator()));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .CHAR_LITERAL,
+        .span = .{ .start = 5, .end = 9 },
+        .lexeme = "'\\n'",
+        .literal = .{ .char = '\n' },
+    }, try lexer.next(arena.allocator()));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .STRING_LITERAL,
+        .span = .{ .start = 11, .end = 18 },
+        .lexeme = "\"Hello\"",
+        .literal = .{ .string = "Hello" },
+    }, try lexer.next(arena.allocator()));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .STRING_LITERAL,
+        .span = .{ .start = 19, .end = 32 },
+        .lexeme = "\"Hello world\"",
+        .literal = .{ .string = "Hello world" },
+    }, try lexer.next(arena.allocator()));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .STRING_LITERAL,
+        .span = .{ .start = 33, .end = 47 },
+        .lexeme = "\"Lorem\\nIpsum\"",
+        .literal = .{ .string = "Lorem\nIpsum" },
+    }, try lexer.next(arena.allocator()));
+}
+
+test "Lex comments and whitespace characters" {
+    const source =
+        \\ // This is a first comment.
+        \\ // This is a second comment.
+        \\
+        \\ // And this one is preceded with newline
+        \\ /* I am multiline
+        \\ comment */
+    ;
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .EOF,
+        .span = .{ .start = source.len, .end = source.len },
+        .lexeme = "",
+    }, try lexer.next(alloc));
+}
+
+test "Lex operators" {
+    const source = "== > <= != << + ++ -- || ^ = . ... ..";
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .EQ_EQ,
+        .span = .{ .start = 0, .end = 2 },
+        .lexeme = "==",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .GREATER_THAN,
+        .span = .{ .start = 3, .end = 4 },
+        .lexeme = ">",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .LESS_EQUAL,
+        .span = .{ .start = 5, .end = 7 },
+        .lexeme = "<=",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .NOT_EQ,
+        .span = .{ .start = 8, .end = 10 },
+        .lexeme = "!=",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .BITSHIFT_LEFT,
+        .span = .{ .start = 11, .end = 13 },
+        .lexeme = "<<",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .ADD,
+        .span = .{ .start = 14, .end = 15 },
+        .lexeme = "+",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INCREMENT,
+        .span = .{ .start = 16, .end = 18 },
+        .lexeme = "++",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .DECREMENT,
+        .span = .{ .start = 19, .end = 21 },
+        .lexeme = "--",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .LOGICAL_OR,
+        .span = .{ .start = 22, .end = 24 },
+        .lexeme = "||",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .BITWISE_XOR,
+        .span = .{ .start = 25, .end = 26 },
+        .lexeme = "^",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .ASSIGN,
+        .span = .{ .start = 27, .end = 28 },
+        .lexeme = "=",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .DOT,
+        .span = .{ .start = 29, .end = 30 },
+        .lexeme = ".",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .SPREAD,
+        .span = .{ .start = 31, .end = 34 },
+        .lexeme = "...",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .RANGE,
+        .span = .{ .start = 35, .end = 37 },
+        .lexeme = "..",
+    }, try lexer.next(alloc));
+}
+
+test "Lex range operator in between numbers" {
+    const source = "1..10";
+    var lexer = Self{ .source = source };
+    const alloc = std.testing.allocator;
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 0, .end = 1 },
+        .lexeme = "1",
+        .literal = .{ .integer = 1 },
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .RANGE,
+        .span = .{ .start = 1, .end = 3 },
+        .lexeme = "..",
+    }, try lexer.next(alloc));
+
+    try std.testing.expectEqualDeep(Token{
+        .type = .INTEGER_LITERAL,
+        .span = .{ .start = 3, .end = 5 },
+        .lexeme = "10",
+        .literal = .{ .integer = 10 },
+    }, try lexer.next(alloc));
+}
