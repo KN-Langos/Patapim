@@ -28,8 +28,8 @@ pub fn main() !void {
         \\}
         \\enum E { A, B, C }
         \\if (a < b) { print(a); } else if (b < a) { print(b); } else {}
-        \\loop { print(1); }
-        \\while (a < b) { print(1); }
+        \\loop { print(1); break; }
+        \\while (a < b) { print(1); continue; }
         \\for(i in 0..5) { print(i); }
         \\!a.b().c[1][2];
         \\const x = Person { name: "Patapim", age: 321, };
