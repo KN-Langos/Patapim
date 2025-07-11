@@ -508,7 +508,7 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
         defer _ = self.popSpan();
 
         // Types are optional.
-        var type_node: ?ast.NodeId = null;
+        var type_node: ?common.NodeId = null;
         if (try self.maybe(.COLON) != null)
             type_node = try self.expectIdentifier();
 
@@ -842,19 +842,23 @@ pub fn parseAtom(self: *Self) !usize {
             try self.pushSpan();
             defer _ = self.popSpan();
 
-            const iden = try self.tree.addNode(.{
+            const ident = try self.tree.addNode(.{
                 .span = token.span,
                 .kind = .{ .identifier = token.lexeme },
+            });
+            const variable = try self.tree.addNode(.{
+                .span = token.span,
+                .kind = .{ .variable_ref = ident },
             });
 
             const next = try self.peek();
             if (next.type == .INCREMENT or next.type == .DECREMENT or next.type == .DOT or next.type == .LEFT_PAREN or next.type == .LEFT_SQUARE or next.type == .LEFT_CURLY) {
                 // This is a function call or member access (or just incrementation/decrementation).
                 // We will handle it in a separate function.
-                return try self.parsePostfix(iden);
+                return try self.parsePostfix(variable);
             }
 
-            return iden;
+            return variable;
         },
         .KW_IF => {
             return try self.parseInlineConditional();

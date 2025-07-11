@@ -33,6 +33,10 @@ pub fn Visitor(
 
             switch (kind_tag) {
                 inline else => |tag| {
+                    if (@hasField(VisitorImpl, "current_nodeid")) {
+                        self.current_nodeid = node_id; // I forgot to pass this.
+                    }
+
                     const tag_name = @tagName(tag);
                     const visitor_fn_name = "visit" ++ comptime snakeToPascal(tag_name);
                     const value = @field(node.kind, tag_name);

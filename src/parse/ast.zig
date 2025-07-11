@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const common = @import("../common.zig");
+const NodeId = common.NodeId;
 pub const PrettyPrinter = @import("../utility/AstPrettyPrinter.zig");
 
 // Type alias for AST Tree.
@@ -60,9 +61,8 @@ pub const NodeKind = union(enum) {
     array_literal: ArrayLiteral,
     indexed_access: IndexedAccess,
     struct_literal: StructLiteral,
+    variable_ref: NodeId,
 };
-
-pub const NodeId = usize;
 
 // ---< AST Nodes begin >---
 // All AST node structs should be located in this section of code.
@@ -72,6 +72,7 @@ pub const NodeId = usize;
 // no corresponding langauge syntax. This is just a wrapper
 // to provide one ID with whole top-level code.
 pub const Module = struct {
+    name: ?NodeId = null, // For named imports.
     body: NodeId,
 };
 
