@@ -510,3 +510,90 @@ pub fn visitFieldDef(self: *Self, tree: *const ast.Tree, span: common.Span, def:
     try self.writer.writeAll(": ");
     try self.accept(tree, def.value);
 }
+
+pub fn visitBreakStmt(self: *Self, tree: *const ast.Tree, span: common.Span, _: void, visitee: anytype) !void {
+    _ = tree;
+    _ = visitee;
+
+    try self.writeIndent();
+    try self.writer.print("{}break{}", .{
+        ansi.Style{ .foreground = .{ .basic = .yellow } },
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
+    try self.writeSpan(span);
+    try self.writer.writeAll(";\n");
+}
+
+pub fn visitContinueStmt(self: *Self, tree: *const ast.Tree, span: common.Span, _: void, visitee: anytype) !void {
+    _ = tree;
+    _ = visitee;
+
+    try self.writeIndent();
+    try self.writer.print("{}continue{}", .{
+        ansi.Style{ .foreground = .{ .basic = .yellow } },
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
+    try self.writeSpan(span);
+    try self.writer.writeAll(";\n");
+}
+
+const std = @import("std");
+const testing = std.testing;
+
+test "Pretty print break statement" {
+    const allocator = testing.allocator;
+    
+    // Create AST nodes for break statement
+    var tree = ast.Tree.init(allocator);
+    defer tree.deinit();
+    
+    const break_id = try tree.addNode(.{
+        .span = .{ .start = 0, .end = 6 },
+        .kind = .{ .break_stmt = {} },
+    });
+    
+    // Create pretty printer
+    var output = std.ArrayList(u8).init(allocator);
+    defer output.deinit();
+    
+    var pretty_printer = Self{
+        .writer = output.writer().any(),
+        .print_spans = false,
+    };
+    
+    // Pretty print the break statement
+    try pretty_printer.accept(&tree, break_id);
+    
+    // Check the output
+    const expected = "break;\n";
+    try testing.expectEqualStrings(expected, output.items);
+}
+
+test "Pretty print continue statement" {
+    const allocator = testing.allocator;
+    
+    // Create AST nodes for continue statement
+    var tree = ast.Tree.init(allocator);
+    defer tree.deinit();
+    
+    const continue_id = try tree.addNode(.{
+        .span = .{ .start = 0, .end = 9 },
+        .kind = .{ .continue_stmt = {} },
+    });
+    
+    // Create pretty printer
+    var output = std.ArrayList(u8).init(allocator);
+    defer output.deinit();
+    
+    var pretty_printer = Self{
+        .writer = output.writer().any(),
+        .print_spans = false,
+    };
+    
+    // Pretty print the continue statement
+    try pretty_printer.accept(&tree, continue_id);
+    
+    // Check the output
+    const expected = "continue;\n";
+    try testing.expectEqualStrings(expected, output.items);
+}
