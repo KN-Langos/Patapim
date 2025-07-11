@@ -21,7 +21,10 @@ pub fn main() !void {
         \\const y = [1, 2, ... 3..10];
         \\struct Person {
         \\    name, age,
-        \\    fn greet() { print("Hello, " + this.name + "!"); }
+        \\    fn greet() { 
+        \\      print("Hello, " + this.name + "!"); 
+        \\      return this.age;
+        \\    }
         \\}
         \\enum E { A, B, C }
         \\if (a < b) { print(a); } else if (b < a) { print(b); } else {}

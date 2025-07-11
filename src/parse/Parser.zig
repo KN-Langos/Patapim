@@ -544,12 +544,9 @@ pub fn parseMaybeReturnStatement(self: *Self) !?usize {
 
     var expression: ?usize = null;
 
-    if ((try self.peek()).type != .SEMICOLON) {
+    if (try self.maybe(.SEMICOLON) == null) {
         // If we do not have semicolon, we expect an expression.
         expression = try self.parseExpression();
-        _ = try self.expect(.SEMICOLON);
-    } else {
-        // If we have semicolon, we do not return anything.
         _ = try self.expect(.SEMICOLON);
     }
 
