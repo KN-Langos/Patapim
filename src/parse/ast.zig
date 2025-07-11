@@ -51,6 +51,8 @@ pub const NodeKind = union(enum) {
     enum_decl: EnumDecl,
     conditional: Conditional,
     expr_stmt: NodeId, // This is special statement wrapper for expressions as statements.
+    break_stmt: void,
+    continue_stmt: void,
 
     // ---< Expression nodes >---
     function_call: FunctionCall,
