@@ -11,18 +11,27 @@ pub usingnamespace Visitor;
 
 writer: std.io.AnyWriter,
 print_spans: bool = true,
+print_ids: bool = true,
 indent: usize = 0,
+current_nodeid: usize = 0, // This will be modified by visitor.
 
 const Self = @This();
 
 fn writeSpan(self: *Self, span: common.Span) !void {
-    if (!self.print_spans) return;
-    try self.writer.print("{}@{d}:{d}{}", .{
-        ansi.Style{ .foreground = .{ .basic = .cyan } },
-        span.start,
-        span.end,
-        ansi.Style{ .modifiers = .{ .reset = true } },
-    });
+    if (self.print_spans)
+        try self.writer.print("{}@{d}:{d}{}", .{
+            ansi.Style{ .foreground = .{ .basic = .cyan } },
+            span.start,
+            span.end,
+            ansi.Style{ .modifiers = .{ .reset = true } },
+        });
+
+    if (self.print_ids)
+        try self.writer.print("{}#{d}{}", .{
+            ansi.Style{ .foreground = .{ .basic = .bright_cyan } },
+            self.current_nodeid,
+            ansi.Style{ .modifiers = .{ .reset = true } },
+        });
 }
 
 fn writeIndent(self: *Self) !void {

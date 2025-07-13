@@ -2,6 +2,8 @@ const std = @import("std");
 
 const reportz = @import("reportz");
 
+pub const NodeId = usize;
+
 // Span stores indices of where given token or node starts and ends.
 pub const Span = struct {
     start: usize,
