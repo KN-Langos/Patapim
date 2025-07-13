@@ -1356,7 +1356,7 @@ test "Parse tuples (single)" {
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 4 },
         .kind = .{ .tuple = .{
-            .expressions = &.{0},
+            .expressions = &.{1},
         } },
     }, tuple_node);
 }
@@ -1372,7 +1372,7 @@ test "Parse tuples (multiple)" {
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 7 },
         .kind = .{ .tuple = .{
-            .expressions = &.{ 0, 1, 2 },
+            .expressions = &.{ 1, 3, 5 },
         } },
     }, tuple_node);
 }
@@ -1387,7 +1387,7 @@ test "Parse tuples (multiple with inside tuple)" {
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 0, .end = 12 },
         .kind = .{ .tuple = .{
-            .expressions = &.{ 0, 1, 4 },
+            .expressions = &.{ 1, 3, 8 },
         } },
     }, tuple_node);
 }
