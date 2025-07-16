@@ -42,14 +42,16 @@ pub const RuntimeValue = union(enum) {
 pub const Environment = struct {
     parent: ?*Environment,
     values: std.StringHashMap(RuntimeValue),
+    is_top_level: bool = false, // Indicates if this is the top-level environment.
 
     // Initializes a new environment with an optional parent environment.
     // The parent environment allows for variable lookups in outer scopes.
     // It returns an error if the initialization fails.
-    pub fn init(allocator: std.mem.Allocator, parent: ?*Environment) !Environment {
+    pub fn init(allocator: std.mem.Allocator, parent: ?*Environment, is_top_level: bool) !Environment {
         return Environment{
             .parent = parent,
             .values = std.StringHashMap(RuntimeValue).init(allocator),
+            .is_top_level = is_top_level,
         };
     }
 

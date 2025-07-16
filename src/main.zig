@@ -53,6 +53,17 @@ pub fn main() !void {
         \\brr def = 2*2;
         \\brr ghi = def - abc;
         \\ghi = ghi + (1 * 0.5);
+        \\if(abc < def) {
+        \\    brr x = 1;
+        \\    abc = x;
+        \\} else if(2 > 3) {
+        \\    brr x = 2;
+        \\    abc = x;
+        \\} else {
+        \\    brr x = 3;
+        \\    abc = x;
+        \\}
+        \\brr xyz = if(abc == 3) 10 else 20;
     ;
 
     var lexer: patapim.Lexer = .{ .source = source };
