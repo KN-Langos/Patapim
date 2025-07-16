@@ -6,6 +6,8 @@ const std = @import("std");
 pub const Lexer = @import("Lexer.zig");
 pub const ast = @import("parse/ast.zig");
 pub const Parser = @import("parse/Parser.zig");
+pub const Interpreter = @import("interpreter/Interpreter.zig");
+pub const runtime = @import("interpreter/runtime.zig");
 
 pub const analysis = struct {
     pub const Metadata = @import("analysis/Metadata.zig");
