@@ -21,7 +21,7 @@ const LOG = std.log.scoped(.interpreter);
 // Initializes the interpreter with the given AST tree and global environment.
 // The global environment is used to store variables and their values.
 pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree) !Self {
-    const global_environment = try runtime.Environment.init(allocator, null);
+    const global_environment = try runtime.Environment.init(allocator, null, true);
 
     return Self{
         .allocator = allocator,
@@ -112,13 +112,13 @@ pub fn reportError(
 // It evaluates the nodes in the tree and executes the corresponding actions.
 // The global environment is used to store variable bindings and their values.
 pub fn interpret(self: *Self, root_id: usize) !void {
-    _ = try self.evalNode(self.tree, root_id, &self.global_env, true);
+    _ = try self.evalNode(self.tree, root_id, &self.global_env);
 }
 
 // Evaluates a node in the AST tree.
 // It dispatches the evaluation to the appropriate handler based on the node type.
 // The node can be a module, code block, expression, or variable declaration.
-pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtime.Environment, is_top_level: bool) Self.Error!runtime.RuntimeValue {
+pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const node = tree.getNode(node_id) orelse return self.reportError(
         "I001",
         "Node with ID {} does not exist.",
@@ -137,7 +137,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .module => |module| {
             // Evaluate the module, which is the root of the AST.
             var result: runtime.RuntimeValue = .Void;
-            result = try self.evalNode(tree, module.body, env, true);
+            result = try self.evalNode(tree, module.body, env);
             return result;
         },
         .code_block => |code_block| {
@@ -146,11 +146,12 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             var block_env = env;
 
             var heap_env: ?*runtime.Environment = null;
-            if (!is_top_level) {
+            if (!env.is_top_level) {
                 heap_env = try self.allocator.create(runtime.Environment);
-                heap_env.?.* = try runtime.Environment.init(self.allocator, env);
+                heap_env.?.* = try runtime.Environment.init(self.allocator, env, false);
                 block_env = heap_env.?;
             }
+            env.is_top_level = false;
 
             defer if (heap_env) |e| {
                 e.deinit();
@@ -158,7 +159,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             };
 
             for (code_block) |stmt_id| {
-                result = try self.evalNode(tree, stmt_id, block_env, false);
+                result = try self.evalNode(tree, stmt_id, block_env);
             }
             return result;
         },
@@ -182,16 +183,16 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             );
             return value;
         },
-        .assignment => try self.evalAssignment(tree, node, env, is_top_level),
-        .binary_operator => try self.evalBinaryExpr(tree, node, env, is_top_level),
-        .unary_operator => try self.evalUnaryExpr(tree, node, env, is_top_level),
+        .assignment => try self.evalAssignment(tree, node, env),
+        .binary_operator => try self.evalBinaryExpr(tree, node, env),
+        .unary_operator => try self.evalUnaryExpr(tree, node, env),
         .expression_group => |group| {
             // Evaluate the expression inside the group.
-            return try self.evalNode(tree, group.expression, env, is_top_level);
+            return try self.evalNode(tree, group.expression, env);
         },
         .expr_stmt => |expr_stmt| {
             // Evaluate the expression statement.
-            return try self.evalNode(tree, expr_stmt, env, is_top_level);
+            return try self.evalNode(tree, expr_stmt, env);
         },
         .variable_ref => |variable_ref| {
             // TODO: Extract search identifier name logic to a separate function.
@@ -215,13 +216,15 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         },
         .variable => |variable| {
             // Evaluate the variable declaration.
-            const value = try self.evalNode(tree, variable.expression, env, is_top_level);
+            const value = try self.evalNode(tree, variable.expression, env);
 
             const name = try self.getIdentifierName(tree, variable.name);
 
             try env.define(name, value);
             return value;
         },
+        .conditional => return try self.evalConditional(tree, node, env),
+        .inline_conditional => return try self.evalInlineConditional(tree, node, env),
         else => {
             LOG.warn("Unsupported node type: {s}", .{@tagName(node.kind)});
 
@@ -242,7 +245,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
     };
 }
 
-pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment, is_top_level: bool) !runtime.RuntimeValue {
+pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) !runtime.RuntimeValue {
     const assignment = node.kind.assignment;
     const name_node = tree.getNode(assignment.target) orelse return self.reportError(
         "I010",
@@ -264,7 +267,7 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         else => return error.UnsupportedNodeType,
     };
 
-    const value = try self.evalNode(tree, assignment.value, env, is_top_level);
+    const value = try self.evalNode(tree, assignment.value, env);
 
     // Set the value in the environment.
     switch (assignment.operator) {
@@ -289,22 +292,22 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
     return value;
 }
 
-pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment, is_top_level: bool) !runtime.RuntimeValue {
+pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) !runtime.RuntimeValue {
     const binary_expr = node.kind.binary_operator;
-    const left_value = try self.evalNode(tree, binary_expr.left, env, is_top_level);
-    const right_value = try self.evalNode(tree, binary_expr.right, env, is_top_level);
+    const left_value = try self.evalNode(tree, binary_expr.left, env);
+    const right_value = try self.evalNode(tree, binary_expr.right, env);
 
     return switch (binary_expr.operator) {
         .ADD => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Integer = li + ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Float = @as(f64, @floatFromInt(li)) + rf },
+                    .Integer => |ri| break :blk .{ .Integer = li + ri },
+                    .Float => |rf| break :blk .{ .Float = @as(f64, @floatFromInt(li)) + rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Float = lf + @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Float = lf + rf },
+                    .Integer => |ri| break :blk .{ .Float = lf + @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Float = lf + rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 // TODO: Implement string concatenation.
@@ -314,13 +317,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .SUBTRACT => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Integer = li - ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Float = @as(f64, @floatFromInt(li)) - rf },
+                    .Integer => |ri| break :blk .{ .Integer = li - ri },
+                    .Float => |rf| break :blk .{ .Float = @as(f64, @floatFromInt(li)) - rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Float = lf - @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Float = lf - rf },
+                    .Integer => |ri| break :blk .{ .Float = lf - @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Float = lf - rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -329,13 +332,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .MULTIPLY => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Integer = li * ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Float = @as(f64, @floatFromInt(li)) * rf },
+                    .Integer => |ri| break :blk .{ .Integer = li * ri },
+                    .Float => |rf| break :blk .{ .Float = @as(f64, @floatFromInt(li)) * rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Float = lf * @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Float = lf * rf },
+                    .Integer => |ri| break :blk .{ .Float = lf * @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Float = lf * rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -344,13 +347,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .DIVIDE => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Integer = @divTrunc(li, ri) },
-                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Float = @divTrunc(@as(f64, @floatFromInt(li)), rf) },
+                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk .{ .Integer = @divTrunc(li, ri) },
+                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk .{ .Float = @divTrunc(@as(f64, @floatFromInt(li)), rf) },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Float = @divTrunc(lf, @as(f64, @floatFromInt(ri))) },
-                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Float = @divTrunc(lf, rf) },
+                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk .{ .Float = @divTrunc(lf, @as(f64, @floatFromInt(ri))) },
+                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk .{ .Float = @divTrunc(lf, rf) },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -359,13 +362,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .MODULO => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Integer = @rem(li, ri) },
-                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Float = @rem(@as(f64, @floatFromInt(li)), rf) },
+                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk .{ .Integer = @rem(li, ri) },
+                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk .{ .Float = @rem(@as(f64, @floatFromInt(li)), rf) },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Float = @rem(lf, @as(f64, @floatFromInt(ri))) },
-                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk runtime.RuntimeValue{ .Float = @rem(lf, rf) },
+                    .Integer => |ri| if (ri == 0) return error.DivisionByZero else break :blk .{ .Float = @rem(lf, @as(f64, @floatFromInt(ri))) },
+                    .Float => |rf| if (rf == 0.0) return error.DivisionByZero else break :blk .{ .Float = @rem(lf, rf) },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -374,21 +377,21 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .EQ_EQ => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = li == ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = @as(f64, @floatFromInt(li)) == rf },
+                    .Integer => |ri| break :blk .{ .Boolean = li == ri },
+                    .Float => |rf| break :blk .{ .Boolean = @as(f64, @floatFromInt(li)) == rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = lf == @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = lf == rf },
+                    .Integer => |ri| break :blk .{ .Boolean = lf == @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Boolean = lf == rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Boolean => |lb| switch (right_value) {
-                    .Boolean => |rb| break :blk runtime.RuntimeValue{ .Boolean = lb == rb },
+                    .Boolean => |rb| break :blk .{ .Boolean = lb == rb },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .String => |ls| switch (right_value) {
-                    .String => |rs| break :blk runtime.RuntimeValue{ .Boolean = std.mem.eql(u8, ls, rs) },
+                    .String => |rs| break :blk .{ .Boolean = std.mem.eql(u8, ls, rs) },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -397,21 +400,21 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .NOT_EQ => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = li != ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = @as(f64, @floatFromInt(li)) != rf },
+                    .Integer => |ri| break :blk .{ .Boolean = li != ri },
+                    .Float => |rf| break :blk .{ .Boolean = @as(f64, @floatFromInt(li)) != rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = lf != @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = lf != rf },
+                    .Integer => |ri| break :blk .{ .Boolean = lf != @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Boolean = lf != rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Boolean => |lb| switch (right_value) {
-                    .Boolean => |rb| break :blk runtime.RuntimeValue{ .Boolean = lb != rb },
+                    .Boolean => |rb| break :blk .{ .Boolean = lb != rb },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .String => |ls| switch (right_value) {
-                    .String => |rs| break :blk runtime.RuntimeValue{ .Boolean = !std.mem.eql(u8, ls, rs) },
+                    .String => |rs| break :blk .{ .Boolean = !std.mem.eql(u8, ls, rs) },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -420,13 +423,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .LESS_THAN => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = li < ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = @as(f64, @floatFromInt(li)) < rf },
+                    .Integer => |ri| break :blk .{ .Boolean = li < ri },
+                    .Float => |rf| break :blk .{ .Boolean = @as(f64, @floatFromInt(li)) < rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = lf < @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = lf < rf },
+                    .Integer => |ri| break :blk .{ .Boolean = lf < @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Boolean = lf < rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -435,13 +438,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .GREATER_THAN => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = li > ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = @as(f64, @floatFromInt(li)) > rf },
+                    .Integer => |ri| break :blk .{ .Boolean = li > ri },
+                    .Float => |rf| break :blk .{ .Boolean = @as(f64, @floatFromInt(li)) > rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = lf > @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = lf > rf },
+                    .Integer => |ri| break :blk .{ .Boolean = lf > @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Boolean = lf > rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -450,13 +453,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .LESS_EQUAL => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = li <= ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = @as(f64, @floatFromInt(li)) <= rf },
+                    .Integer => |ri| break :blk .{ .Boolean = li <= ri },
+                    .Float => |rf| break :blk .{ .Boolean = @as(f64, @floatFromInt(li)) <= rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = lf <= @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = lf <= rf },
+                    .Integer => |ri| break :blk .{ .Boolean = lf <= @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Boolean = lf <= rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -465,13 +468,13 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         .GREATER_EQUAL => blk: {
             switch (left_value) {
                 .Integer => |li| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = li >= ri },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = @as(f64, @floatFromInt(li)) >= rf },
+                    .Integer => |ri| break :blk .{ .Boolean = li >= ri },
+                    .Float => |rf| break :blk .{ .Boolean = @as(f64, @floatFromInt(li)) >= rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 .Float => |lf| switch (right_value) {
-                    .Integer => |ri| break :blk runtime.RuntimeValue{ .Boolean = lf >= @as(f64, @floatFromInt(ri)) },
-                    .Float => |rf| break :blk runtime.RuntimeValue{ .Boolean = lf >= rf },
+                    .Integer => |ri| break :blk .{ .Boolean = lf >= @as(f64, @floatFromInt(ri)) },
+                    .Float => |rf| break :blk .{ .Boolean = lf >= rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
                 else => return error.InvalidTypeForBinaryOperation,
@@ -486,7 +489,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Boolean => |b| b,
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Boolean = left_bool and right_bool };
+            break :blk .{ .Boolean = left_bool and right_bool };
         },
         .LOGICAL_OR => blk: {
             const left_bool = switch (left_value) {
@@ -497,7 +500,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Boolean => |b| b,
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Boolean = left_bool or right_bool };
+            break :blk .{ .Boolean = left_bool or right_bool };
         },
         .BITSHIFT_LEFT => blk: {
             const left_int = switch (left_value) {
@@ -508,7 +511,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Integer => |i| i,
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = left_int << @as(u6, @intCast(right_int)) };
+            break :blk .{ .Integer = left_int << @as(u6, @intCast(right_int)) };
         },
         .BITSHIFT_RIGHT => blk: {
             const left_int = switch (left_value) {
@@ -519,7 +522,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Integer => |i| i,
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = left_int >> @as(u6, @intCast(right_int)) };
+            break :blk .{ .Integer = left_int >> @as(u6, @intCast(right_int)) };
         },
         .BITWISE_AND => blk: {
             const left_val = switch (left_value) {
@@ -532,7 +535,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Float => |f| @as(i64, @intFromFloat(f)),
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = left_val & right_val };
+            break :blk .{ .Integer = left_val & right_val };
         },
         .BITWISE_OR => blk: {
             const left_val = switch (left_value) {
@@ -545,7 +548,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Float => |f| @as(i64, @intFromFloat(f)),
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = left_val | right_val };
+            break :blk .{ .Integer = left_val | right_val };
         },
         .BITWISE_XOR => blk: {
             const left_val = switch (left_value) {
@@ -558,7 +561,7 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 .Float => |f| @as(i64, @intFromFloat(f)),
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = left_val ^ right_val };
+            break :blk .{ .Integer = left_val ^ right_val };
         },
         // RANGE: This is a placeholder for range operator.
         else => return self.reportError(
@@ -577,9 +580,9 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
     };
 }
 
-pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment, is_top_level: bool) !runtime.RuntimeValue {
+pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) !runtime.RuntimeValue {
     const unary_expr = node.kind.unary_operator;
-    const operand_value = try self.evalNode(tree, unary_expr.operand, env, is_top_level);
+    const operand_value = try self.evalNode(tree, unary_expr.operand, env);
 
     return switch (unary_expr.operator) {
         .NOT => blk: {
@@ -587,7 +590,7 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
                 .Boolean => |b| b,
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Boolean = !operand_bool };
+            break :blk .{ .Boolean = !operand_bool };
         },
         .BITWISE_NOT => blk: {
             const operand_int = switch (operand_value) {
@@ -595,7 +598,7 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
                 .Float => |f| @as(i64, @intFromFloat(f)),
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = ~operand_int };
+            break :blk .{ .Integer = ~operand_int };
         },
         .SUBTRACT => blk: {
             const operand_int = switch (operand_value) {
@@ -603,7 +606,7 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
                 .Float => |f| @as(i64, @intFromFloat(f)),
                 else => return error.InvalidTypeForBinaryOperation,
             };
-            break :blk runtime.RuntimeValue{ .Integer = -operand_int };
+            break :blk .{ .Integer = -operand_int };
         },
         // INCREMENT: This is a placeholder for increment operator.
         // DECREMENT: This is a placeholder for decrement operator.
@@ -620,6 +623,60 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
                 }},
             },
         ),
+    };
+}
+
+pub fn evalConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const conditional = node.kind.conditional;
+
+    // If there's no condition, it's an unconditional else block.
+    if (conditional.condition == null) {
+        return try self.evalNode(tree, conditional.body, env);
+    }
+
+    // Evaluate the condition expression.
+    const condition_value = try self.evalNode(tree, conditional.condition.?, env);
+    const condition_bool = isTruthy(condition_value);
+
+    // If the condition is true, evaluate the 'then' block.
+    if (condition_bool) {
+        return try self.evalNode(tree, conditional.body, env);
+    } else if (conditional.else_conditional != null) {
+        // If there is an 'else' block, evaluate it.
+        return try self.evalNode(tree, conditional.else_conditional.?, env);
+    }
+
+    // If there is no 'else if' or 'else' block, return Void.
+    return runtime.RuntimeValue.Void;
+}
+
+pub fn evalInlineConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const inline_conditional = node.kind.inline_conditional;
+
+    // Evaluate the condition expression.
+    const condition_value = try self.evalNode(tree, inline_conditional.condition, env);
+    const condition_bool = isTruthy(condition_value);
+
+    // If the condition is true, evaluate the 'then' expression.
+    if (condition_bool) {
+        return try self.evalNode(tree, inline_conditional.then_expr, env);
+    }
+
+    // If the condition is false, evaluate the 'else' expression.
+    return try self.evalNode(tree, inline_conditional.else_expr, env);
+}
+
+// Checks if a runtime value is truthy.
+// This function is used to determine the truthiness of a value in conditional expressions.
+// It returns true for non-zero integers, non-zero floats, non-empty strings, and true boolean values.
+// All other values are considered falsey.
+fn isTruthy(value: runtime.RuntimeValue) bool {
+    return switch (value) {
+        .Boolean => |b| b,
+        .Integer => |i| i != 0,
+        .Float => |f| f != 0.0,
+        .String => |s| s.len != 0,
+        else => false, // Other types are considered falsey.
     };
 }
 
