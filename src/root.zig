@@ -18,7 +18,12 @@ pub const analysis = struct {
 // Above are temporary public imports. Used for testing until there is proper library API.
 
 test {
-    // This ensures that all submodules are referenced when compiling tests
-    // to prevent tree shaking from removing tests.
-    std.testing.refAllDeclsRecursive(@This());
+    _ = @import("Lexer.zig");
+    _ = @import("parse/Parser.zig");
+    _ = @import("parse/ast.zig");
+    _ = @import("interpreter/Interpreter.zig");
+    _ = @import("interpreter/runtime.zig");
+    _ = @import("analysis/Metadata.zig");
+    _ = @import("analysis/ItemNameBindingPass.zig");
+    _ = @import("analysis/NameResolutionPass.zig");
 }
