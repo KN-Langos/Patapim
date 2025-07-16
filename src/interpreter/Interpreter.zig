@@ -18,24 +18,33 @@ diagnostic_log: std.ArrayList(reportz.reports.Diagnostic),
 pub const Self = @This();
 const LOG = std.log.scoped(.interpreter);
 
+// Initializes the interpreter with the given AST tree and global environment.
+// The global environment is used to store variables and their values.
 pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree) !Self {
-    const global_env = try runtime.Environment.init(allocator, null);
+    const global_environment = try runtime.Environment.init(allocator, null);
 
     return Self{
         .allocator = allocator,
         .tree = tree,
-        .global_env = global_env,
+        .global_env = global_environment,
         .diagnostic_arena = .init(allocator),
         .diagnostic_log = .init(allocator),
     };
 }
 
+// Deinitializes the interpreter, freeing up resources.
+// This includes deinitializing the global environment and diagnostic log.
+// It should be called when the interpreter is no longer needed.
+// It is important to call this to prevent memory leaks.
 pub fn deinit(self: *Self) void {
     self.diagnostic_log.deinit();
     self.diagnostic_arena.deinit();
     self.global_env.deinit();
 }
 
+// Prints debug information about the interpreter's state.
+// This includes the contents of the global environment, such as variable names and their values.
+// It is useful for debugging purposes to see the current state of the interpreter.
 pub fn printDebugInfo(self: *Self) !void {
     std.debug.print("\n\n---< Debug Info >---\n\n", .{});
 
@@ -51,6 +60,7 @@ pub fn printDebugInfo(self: *Self) !void {
     }
 }
 
+// Error types used in the interpreter.
 pub const Error = error{
     InvalidNodeId,
     UnsupportedNodeType,
@@ -59,6 +69,8 @@ pub const Error = error{
     DivisionByZero,
 } || runtime.Error || std.mem.Allocator.Error;
 
+// Reports an error with the given code, message format, and arguments.
+// It appends the error to the diagnostic log and returns the specified error type.
 pub fn reportError(
     self: *Self,
     code: []const u8,
@@ -96,11 +108,17 @@ pub fn reportError(
     return error_type;
 }
 
+// Interprets the AST tree starting from the root node.
+// It evaluates the nodes in the tree and executes the corresponding actions.
+// The global environment is used to store variable bindings and their values.
 pub fn interpret(self: *Self, root_id: usize) !void {
-    _ = try self.evalNode(self.tree, root_id, &self.global_env);
+    _ = try self.evalNode(self.tree, root_id, &self.global_env, true);
 }
 
-pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+// Evaluates a node in the AST tree.
+// It dispatches the evaluation to the appropriate handler based on the node type.
+// The node can be a module, code block, expression, or variable declaration.
+pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtime.Environment, is_top_level: bool) Self.Error!runtime.RuntimeValue {
     const node = tree.getNode(node_id) orelse return self.reportError(
         "I001",
         "Node with ID {} does not exist.",
@@ -119,14 +137,28 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .module => |module| {
             // Evaluate the module, which is the root of the AST.
             var result: runtime.RuntimeValue = .Void;
-            result = try self.evalNode(tree, module.body, env);
+            result = try self.evalNode(tree, module.body, env, true);
             return result;
         },
         .code_block => |code_block| {
             // Evaluate the code block, which is a sequence of statements.
             var result: runtime.RuntimeValue = .Void;
+            var block_env = env;
+
+            var heap_env: ?*runtime.Environment = null;
+            if (!is_top_level) {
+                heap_env = try self.allocator.create(runtime.Environment);
+                heap_env.?.* = try runtime.Environment.init(self.allocator, env);
+                block_env = heap_env.?;
+            }
+
+            defer if (heap_env) |e| {
+                e.deinit();
+                self.allocator.destroy(e);
+            };
+
             for (code_block) |stmt_id| {
-                result = try self.evalNode(tree, stmt_id, env);
+                result = try self.evalNode(tree, stmt_id, block_env, false);
             }
             return result;
         },
@@ -150,16 +182,16 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             );
             return value;
         },
-        .assignment => try self.evalAssignment(tree, node, env),
-        .binary_operator => try self.evalBinaryExpr(tree, node, env),
-        .unary_operator => try self.evalUnaryExpr(tree, node, env),
+        .assignment => try self.evalAssignment(tree, node, env, is_top_level),
+        .binary_operator => try self.evalBinaryExpr(tree, node, env, is_top_level),
+        .unary_operator => try self.evalUnaryExpr(tree, node, env, is_top_level),
         .expression_group => |group| {
             // Evaluate the expression inside the group.
-            return try self.evalNode(tree, group.expression, env);
+            return try self.evalNode(tree, group.expression, env, is_top_level);
         },
         .expr_stmt => |expr_stmt| {
             // Evaluate the expression statement.
-            return try self.evalNode(tree, expr_stmt, env);
+            return try self.evalNode(tree, expr_stmt, env, is_top_level);
         },
         .variable_ref => |variable_ref| {
             // TODO: Extract search identifier name logic to a separate function.
@@ -183,7 +215,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         },
         .variable => |variable| {
             // Evaluate the variable declaration.
-            const value = try self.evalNode(tree, variable.expression, env);
+            const value = try self.evalNode(tree, variable.expression, env, is_top_level);
 
             const name = try self.getIdentifierName(tree, variable.name);
 
@@ -210,7 +242,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
     };
 }
 
-pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) !runtime.RuntimeValue {
+pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment, is_top_level: bool) !runtime.RuntimeValue {
     const assignment = node.kind.assignment;
     const name_node = tree.getNode(assignment.target) orelse return self.reportError(
         "I010",
@@ -232,7 +264,7 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
         else => return error.UnsupportedNodeType,
     };
 
-    const value = try self.evalNode(tree, assignment.value, env);
+    const value = try self.evalNode(tree, assignment.value, env, is_top_level);
 
     // Set the value in the environment.
     switch (assignment.operator) {
@@ -257,10 +289,10 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
     return value;
 }
 
-pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) !runtime.RuntimeValue {
+pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment, is_top_level: bool) !runtime.RuntimeValue {
     const binary_expr = node.kind.binary_operator;
-    const left_value = try self.evalNode(tree, binary_expr.left, env);
-    const right_value = try self.evalNode(tree, binary_expr.right, env);
+    const left_value = try self.evalNode(tree, binary_expr.left, env, is_top_level);
+    const right_value = try self.evalNode(tree, binary_expr.right, env, is_top_level);
 
     return switch (binary_expr.operator) {
         .ADD => blk: {
@@ -545,9 +577,9 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
     };
 }
 
-pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) !runtime.RuntimeValue {
+pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment, is_top_level: bool) !runtime.RuntimeValue {
     const unary_expr = node.kind.unary_operator;
-    const operand_value = try self.evalNode(tree, unary_expr.operand, env);
+    const operand_value = try self.evalNode(tree, unary_expr.operand, env, is_top_level);
 
     return switch (unary_expr.operator) {
         .NOT => blk: {
@@ -591,6 +623,8 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
     };
 }
 
+// Gets the identifier name from the AST tree for a given node ID.
+// This function retrieves the identifier node and checks if it is of the correct type.
 fn getIdentifierName(self: *Self, tree: *const ast.Tree, node_id: usize) Self.Error![]const u8 {
     const identifier_node = tree.getNode(node_id) orelse return self.reportError(
         "I007",
