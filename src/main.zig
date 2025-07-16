@@ -47,7 +47,13 @@ pub fn main() !void {
     //     \\fn add(a, b) { return a + b; }
     // ;
 
-    const source = "-2 == 8 * 4 / (2 + abc++) || a > ~b + 3;";
+    // ---< Interpreter Test >---
+    const source =
+        \\brr abc = 2+2;
+        \\brr def = 2*2;
+        \\brr ghi = def - abc;
+        \\ghi = ghi + (1 * 0.5);
+    ;
 
     var lexer: patapim.Lexer = .{ .source = source };
     var parser = patapim.Parser.init(allocator, &lexer);
@@ -75,4 +81,10 @@ pub fn main() !void {
     //     .metadata = &metadata,
     // };
     // try name_resolution_pass.accept(&parser.tree, module);
+
+    std.debug.print("\n\n---< Interpreter >---\n\n", .{});
+    var interpreter = try patapim.Interpreter.init(allocator, &parser.tree);
+    defer interpreter.deinit();
+    try interpreter.interpret(module);
+    try interpreter.printDebugInfo();
 }
