@@ -64,6 +64,7 @@ pub fn main() !void {
         \\    abc = x;
         \\}
         \\brr xyz = if(abc == 3) 10 else 20;
+        \\const pol = abc + def + ghi + xyz;
     ;
 
     var lexer: patapim.Lexer = .{ .source = source };

@@ -54,7 +54,7 @@ pub fn printDebugInfo(self: *Self) !void {
         const value = entry.value_ptr.*;
 
         // Optional: if `toString` allocates memory, remember to free it
-        const value_str = try value.toString(self.allocator);
+        const value_str = try value.value.toString(self.allocator);
         std.debug.print("Entry: {s} = {s}\n", .{ key, value_str });
         self.allocator.free(value_str);
     }
@@ -195,7 +195,6 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             return try self.evalNode(tree, expr_stmt, env);
         },
         .variable_ref => |variable_ref| {
-            // TODO: Extract search identifier name logic to a separate function.
             const name = try self.getIdentifierName(tree, variable_ref);
 
             // Evaluate the variable reference.
@@ -220,7 +219,16 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
 
             const name = try self.getIdentifierName(tree, variable.name);
 
-            try env.define(name, value);
+            try env.define(name, value, true);
+            return value;
+        },
+        .constant => |constant| {
+            // Evaluate the constant declaration.
+            const value = try self.evalNode(tree, constant.expression, env);
+
+            const name = try self.getIdentifierName(tree, constant.name);
+
+            try env.define(name, value, false);
             return value;
         },
         .conditional => return try self.evalConditional(tree, node, env),
