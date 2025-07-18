@@ -3,6 +3,7 @@ const std = @import("std");
 pub const Error = error{
     UndeclaredVariable,
     VariableAlreadyDeclared,
+    CannotModifyImmutableVariable,
 };
 
 // Runtime values used during the execution of the program.
@@ -29,6 +30,15 @@ pub const RuntimeValue = union(enum) {
     }
 };
 
+// VariableBinding represents a binding of a variable to a runtime value.
+// It holds the value of the variable and a flag indicating if the variable is mutable.
+// This is used in the environment to manage variable states during execution.
+// The `is_mutable` field indicates whether the variable can be modified.
+pub const VariableBinding = struct {
+    value: RuntimeValue,
+    is_mutable: bool, // Indicates if the variable can be modified.
+};
+
 // Environment represents a runtime environment that holds variable bindings.
 // It is a stack of environments where each environment can have its own set of variable bindings.
 // This allows for nested scopes and variable shadowing.
@@ -41,7 +51,7 @@ pub const RuntimeValue = union(enum) {
 // The environment can be used to get and set variable values, supporting both retrieval and assignment.
 pub const Environment = struct {
     parent: ?*Environment,
-    values: std.StringHashMap(RuntimeValue),
+    values: std.StringHashMap(VariableBinding),
     is_top_level: bool = false, // Indicates if this is the top-level environment.
 
     // Initializes a new environment with an optional parent environment.
@@ -50,7 +60,7 @@ pub const Environment = struct {
     pub fn init(allocator: std.mem.Allocator, parent: ?*Environment, is_top_level: bool) !Environment {
         return Environment{
             .parent = parent,
-            .values = std.StringHashMap(RuntimeValue).init(allocator),
+            .values = std.StringHashMap(VariableBinding).init(allocator),
             .is_top_level = is_top_level,
         };
     }
@@ -67,7 +77,7 @@ pub const Environment = struct {
     // If the key is not found, it checks the parent environment recursively.
     // If the key is not found in any environment, it returns null.
     pub fn get(self: *const Environment, key: []const u8) ?RuntimeValue {
-        if (self.values.get(key)) |value| return value;
+        if (self.values.get(key)) |binding| return binding.value;
         if (self.parent) |parent_env| return parent_env.get(key);
         return null;
     }
@@ -75,10 +85,13 @@ pub const Environment = struct {
     // Sets the value for the given key in the environment.
     // It updates the value in the current environment.
     // If the key does not exist, it adds a new entry.
-    // It returns an error if the insertion fails.
     pub fn set(self: *Environment, key: []const u8, value: RuntimeValue) !void {
-        if (self.values.contains(key)) {
-            try self.values.put(key, value); // Update existing binding
+        if (self.values.getPtr(key)) |binding| {
+            if (!binding.is_mutable) {
+                return error.CannotModifyImmutableVariable;
+            }
+            binding.value = value;
+            return;
         } else if (self.parent) |parent_env| {
             try parent_env.set(key, value); // Recurse upward if shadowed
         } else {
@@ -89,12 +102,15 @@ pub const Environment = struct {
     // Defines a new variable in the environment.
     // It checks if the variable already exists and returns an error if it does.
     // If the variable does not exist, it adds a new entry to the environment.
-    pub fn define(self: *Environment, key: []const u8, value: RuntimeValue) !void {
+    pub fn define(self: *Environment, key: []const u8, value: RuntimeValue, is_mutable: bool) !void {
         if (self.values.contains(key)) {
             return error.VariableAlreadyDeclared;
         }
         // If the key already exists, we do not allow redefining it.
         // This is to prevent accidental overwriting of existing variables.
-        try self.values.put(key, value);
+        try self.values.put(key, .{
+            .value = value,
+            .is_mutable = is_mutable,
+        });
     }
 };
