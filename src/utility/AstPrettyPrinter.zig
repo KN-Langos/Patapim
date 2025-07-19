@@ -343,6 +343,23 @@ pub fn visitFunctionCall(self: *Self, tree: *const ast.Tree, span: common.Span, 
     try self.writer.writeByte(')');
 }
 
+pub fn visitClosure(self: *Self, tree: *const ast.Tree, span: common.Span, closure: ast.Closure, visitee: anytype) !void {
+    _ = visitee;
+    _ = span;
+
+    try self.writer.writeByte('(');
+    for (closure.parameters) |param| {
+        try self.accept(tree, param);
+        try self.writer.writeAll(", ");
+    }
+    try self.writer.writeAll(") -> {\n");
+    self.indent += 4;
+    try self.accept(tree, closure.body);
+    self.indent -= 4;
+    try self.writeIndent();
+    try self.writer.writeAll("}");
+}
+
 pub fn visitMemberAccess(self: *Self, tree: *const ast.Tree, span: common.Span, access: ast.MemberAccess, visitee: anytype) !void {
     _ = visitee;
     _ = span;

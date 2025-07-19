@@ -1022,6 +1022,29 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
     try self.pushSpan();
     defer _ = self.popSpan();
 
+    if (try self.maybe(.RIGHT_PAREN) != null) {
+        if (try self.parseMaybeClosure(&.{})) |closure| {
+            // If we parsed a closure, we return it instead of an empty expression group.
+            return closure;
+        }
+
+        const token = try self.peek();
+
+        return self.reportError(
+            "P004",
+            "Not expected empty parentheses.",
+            .{},
+            error.UnexpectedToken,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .magenta },
+                    .span = token.span.asReportz(),
+                    .message = "Found empty parentheses.",
+                }},
+            },
+        );
+    }
+
     const expr = try self.parseExpression();
 
     if (try self.maybe(.COMMA) != null) {
@@ -1059,9 +1082,28 @@ pub fn parseTuple(self: *Self, first_expression: usize) Self.Error!usize {
         }
     }
 
+    if (try self.parseMaybeClosure(expressions.items)) |closure| {
+        // If we parsed a closure, we return it instead of a tuple.
+        return closure;
+    }
+
     return self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .tuple = .{
         .expressions = try expressions.toOwnedSlice(),
     } } });
+}
+
+pub fn parseMaybeClosure(self: *Self, parameters: []usize) !?usize {
+    if (try self.maybe(.ARROW) == null) return null; // This may not be a closure.
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .closure = .{
+            .parameters = parameters,
+            .body = body,
+        } },
+    });
 }
 
 pub fn parseArrayLiteral(self: *Self) Self.Error!usize {
@@ -1376,6 +1418,7 @@ test "Parse tuples (multiple)" {
         } },
     }, tuple_node);
 }
+
 test "Parse tuples (multiple with inside tuple)" {
     const source = "(a,b,(c,d),)";
     var lexer: Lexer = .{ .source = source };
@@ -1390,6 +1433,40 @@ test "Parse tuples (multiple with inside tuple)" {
             .expressions = &.{ 1, 3, 8 },
         } },
     }, tuple_node);
+}
+
+test "Parse no-parameter closure" {
+    const source = "() -> { return 10; }";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const closure = try parser.parseExpression();
+    const closure_node = parser.tree.getNodeUnsafe(closure);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 20 },
+        .kind = .{ .closure = .{
+            .parameters = &.{},
+            .body = 2,
+        } },
+    }, closure_node);
+}
+
+test "Parse closure with parameters" {
+    const source = "(a, b) -> { return a + b; }";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const closure = try parser.parseExpression();
+    const closure_node = parser.tree.getNodeUnsafe(closure);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 27 },
+        .kind = .{ .closure = .{
+            .parameters = &.{ 1, 3 },
+            .body = 10,
+        } },
+    }, closure_node);
 }
 
 test "Parse anonymous struct literal expression" {
