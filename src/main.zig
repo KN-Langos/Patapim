@@ -48,49 +48,17 @@ pub fn main() !void {
     // ;
 
     // ---< Interpreter Test >---
-    const source =
-        \\brr abc = 2+2;
-        \\brr def = 2*2;
-        \\brr ghi = def - abc;
-        \\ghi = ghi + (1 * 0.5);
-        \\if(abc < def) {
-        \\    brr x = 1;
-        \\    abc = x;
-        \\} else if(2 > 3) {
-        \\    brr x = 2;
-        \\    abc = x;
-        \\} else {
-        \\    brr x = 3;
-        \\    abc = x;
-        \\}
-        \\
-        \\
-        \\brr xyz = if(abc == 3) 10 else 20;
-        \\const pol = abc + def + ghi + xyz;
-        \\brr i = 0;
-        \\while(i<10){
-        \\i = i+1;
-        \\}
-        \\brr j = 2;
-        \\brr even = 0;
-        \\loop
-        \\{
-        \\  loop
-        \\  {
-        \\      j = j +1;
-        \\      if(j >= 10)
-        \\       {
-        \\          break;
-        \\       }
-        \\  }
-        \\  even = even + 1;
-        \\  if(even == 15)
-        \\  {
-        \\      break;
-        \\  }
-        \\}
-        \\def += abc;
-    ;
+
+    // Open current directory
+    const cwd = std.fs.cwd();
+
+    // Open the source file
+    const file = try cwd.openFile("./src/test.brr", .{});
+    defer file.close();
+
+    // Read the file contents into a buffer
+    const source = try file.readToEndAlloc(allocator, 10_000); // 10 KB max
+    defer allocator.free(source);
 
     var lexer: patapim.Lexer = .{ .source = source };
     var parser = patapim.Parser.init(allocator, &lexer);
