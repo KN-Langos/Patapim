@@ -199,6 +199,18 @@ fn reportError(self: *Self, code: []const u8, message: []const u8, error_type: S
     return error_type;
 }
 
+// Initialize the lexer with source code and its ID.
+pub fn isAtEndOrOnlyWhitespaceRemaining(self: *Self) bool {
+    var i = self.current;
+    while (i < self.source.len) {
+        switch (self.source[i]) {
+            ' ', '\t', '\n', '\r' => i += 1,
+            else => return false,
+        }
+    }
+    return true;
+}
+
 // Check whether lexer has reached the end of source being scanned.
 pub inline fn isAtEnd(self: *Self) bool {
     return self.current >= self.source.len;

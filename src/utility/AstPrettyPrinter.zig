@@ -536,3 +536,31 @@ pub fn visitFieldDef(self: *Self, tree: *const ast.Tree, span: common.Span, def:
     try self.writer.writeAll(": ");
     try self.accept(tree, def.value);
 }
+
+pub fn visitBreakStmt(self: *Self, tree: *const ast.Tree, span: common.Span, break_stmt: void, visitee: anytype) !void {
+    _ = visitee;
+    _ = tree;
+    _ = break_stmt;
+
+    try self.writeIndent();
+    try self.writer.print("{}break{}", .{
+        ansi.Style{ .foreground = .{ .basic = .yellow } },
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
+    try self.writeSpan(span);
+    try self.writer.writeByte('\n');
+}
+
+pub fn visitContinueStmt(self: *Self, tree: *const ast.Tree, span: common.Span, continue_stmt: void, visitee: anytype) !void {
+    _ = visitee;
+    _ = tree;
+    _ = continue_stmt;
+
+    try self.writeIndent();
+    try self.writer.print("{}continue{}", .{
+        ansi.Style{ .foreground = .{ .basic = .yellow } },
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
+    try self.writeSpan(span);
+    try self.writer.writeByte('\n');
+}

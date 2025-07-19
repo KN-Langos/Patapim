@@ -199,7 +199,7 @@ pub fn parseWholeSource(self: *Self) !usize {
     try self.pushSpanOnNextToken();
     defer _ = self.popSpan(); // We do not need to keep this span on stack after error.
 
-    while (!self.lexer.isAtEnd()) {
+    while (!self.lexer.isAtEndOrOnlyWhitespaceRemaining()) {
         const stmt = try self.parseAnyStatement();
         try module_statements.append(stmt);
     }
