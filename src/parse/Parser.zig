@@ -755,23 +755,47 @@ pub fn parseBinaryExpression(self: *Self, precedence: u8) !usize {
             },
             .kind = switch (nextPrecedence) {
                 // Assignments:
-                1 => .{
-                    .assignment = .{
-                        .operator = switch (next.type) {
-                            .ASSIGN => .ASSIGN,
-                            .ADD_ASSIGN => .ADD_ASSIGN,
-                            .SUB_ASSIGN => .SUB_ASSIGN,
-                            .MUL_ASSIGN => .MUL_ASSIGN,
-                            .DIV_ASSIGN => .DIV_ASSIGN,
-                            .MOD_ASSIGN => .MOD_ASSIGN,
-                            .BITWISE_AND_ASSIGN => .BITWISE_AND_ASSIGN,
-                            .BITWISE_OR_ASSIGN => .BITWISE_OR_ASSIGN,
-                            .BITWISE_XOR_ASSIGN => .BITWISE_XOR_ASSIGN,
-                            else => unreachable,
+                1 => blk: {
+                    var assign_op: ?ast.Operator = null;
+
+                    switch (next.type) {
+                        .ASSIGN => break :blk .{
+                            .assignment = .{
+                                .target = left,
+                                .value = right,
+                            },
                         },
-                        .target = left,
-                        .value = right,
-                    },
+                        .ADD_ASSIGN => assign_op = .ADD,
+                        .SUB_ASSIGN => assign_op = .SUBTRACT,
+                        .MUL_ASSIGN => assign_op = .MULTIPLY,
+                        .DIV_ASSIGN => assign_op = .DIVIDE,
+                        .MOD_ASSIGN => assign_op = .MODULO,
+                        .BITWISE_AND_ASSIGN => assign_op = .BITWISE_AND,
+                        .BITWISE_OR_ASSIGN => assign_op = .BITWISE_OR,
+                        .BITWISE_XOR_ASSIGN => assign_op = .BITWISE_XOR,
+                        else => return error.UnexpectedToken,
+                    }
+
+                    const binary_expr_node = try self.tree.addNode(.{
+                        .span = .{
+                            .start = left_node.span.start,
+                            .end = right_node.span.end,
+                        },
+                        .kind = .{
+                            .binary_operator = .{
+                                .left = left,
+                                .operator = assign_op.?,
+                                .right = right,
+                            },
+                        },
+                    });
+
+                    break :blk .{
+                        .assignment = .{
+                            .target = left,
+                            .value = binary_expr_node,
+                        },
+                    };
                 },
                 else => .{
                     .binary_operator = .{
@@ -1941,9 +1965,8 @@ test "Parse assignment" {
         .span = .{ .start = 0, .end = 10 },
         .kind = .{
             .assignment = .{
-                .operator = .ADD_ASSIGN,
                 .target = 1,
-                .value = 5,
+                .value = 6,
             },
         },
     }, expr_node);
@@ -1955,18 +1978,30 @@ test "Parse assignment" {
         .kind = .{ .identifier = "a" },
     }, target_add_assign);
 
-    // value of '+=': assignment '='
-    const value_add_assign = parser.tree.getNode(5).?;
+    // value of '+=': assignment '=' and later '+'
+    const value_add_assign = parser.tree.getNode(6).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 10 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 1,
+                .operator = .ADD,
+                .right = 5,
+            },
+        },
+    }, value_add_assign);
+
+    // Left operand of '+='
+    const value_add_assign_expr = parser.tree.getNode(5).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 5, .end = 10 },
         .kind = .{
             .assignment = .{
-                .operator = .ASSIGN,
                 .target = 3,
                 .value = 4,
             },
         },
-    }, value_add_assign);
+    }, value_add_assign_expr);
 
     // target of '=': identifier 'b'
     const target_assign = parser.tree.getNode(2).?;

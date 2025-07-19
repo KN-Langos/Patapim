@@ -23,7 +23,7 @@ Patapim ma służyć przede wszystkim jako:
 
 ## 🚧 Status projektu
 
-- **Etap:** Koncepcyjny
+- **Etap:** Projekt jest na wczesnym etapie rozwoju — skupiamy się na tworzeniu fundamentów języka oraz podstawowej architektury interpretera i parsera.
 
 ---
 
