@@ -484,9 +484,9 @@ pub fn visitAssignment(self: *Self, tree: *const ast.Tree, span: common.Span, ex
 
     try self.writer.writeByte('(');
     try self.accept(tree, expr.target);
-    try self.writer.print(" {}{s}{} ", .{
+    try self.writer.print(" {}{}{} ", .{
         ansi.Style{ .foreground = .{ .basic = .bright_magenta } },
-        @tagName(expr.operator),
+        try self.writer.writeByte('='),
         ansi.Style{ .modifiers = .{ .reset = true } },
     });
     try self.accept(tree, expr.value);

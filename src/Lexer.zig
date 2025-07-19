@@ -75,6 +75,8 @@ pub const KEYWORD_MAP: std.StaticStringMap(TokenType) = .initComptime(.{
     .{ "const", .KW_CONST },
     .{ "native", .KW_NATIVE },
     .{ "iserror", .KW_ISERROR },
+    .{ "and", .LOGICAL_AND },
+    .{ "or", .LOGICAL_OR },
 });
 
 pub const TokenType = enum {
