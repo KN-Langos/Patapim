@@ -34,6 +34,7 @@ pub const NodeKind = union(enum) {
     assignment: Assignment,
     expression_group: ExpressionGroup,
     inline_conditional: InlineConditional,
+    closure: Closure,
 
     // ---< Special nodes >---
     module: Module,
@@ -248,8 +249,12 @@ pub const UnaryOperator = struct {
 // `variable_name = value`
 pub const Assignment = struct {
     target: NodeId,
-    operator: AssignmentOperator,
     value: NodeId, // Expression
+};
+
+pub const Closure = struct {
+    parameters: []const NodeId,
+    body: NodeId,
 };
 
 // Expression group node. This is used to group expressions together.
@@ -297,22 +302,6 @@ pub const Operator = enum {
     DECREMENT, // '--'
 
     RANGE, // '..' (used in for loops)
-
-    UNKNOWN,
-};
-
-// Assigment operator.
-// This is used to represent the operator itself, and not the whole expression.
-pub const AssignmentOperator = enum {
-    ASSIGN, // '='
-    ADD_ASSIGN, // '+='
-    SUB_ASSIGN, // '-='
-    MUL_ASSIGN, // '*='
-    DIV_ASSIGN, // '/='
-    MOD_ASSIGN, // '%='
-    BITWISE_AND_ASSIGN, // '&='
-    BITWISE_OR_ASSIGN, // '|='
-    BITWISE_XOR_ASSIGN, // '^='
 
     UNKNOWN,
 };

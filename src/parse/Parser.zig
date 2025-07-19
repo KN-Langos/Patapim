@@ -755,23 +755,47 @@ pub fn parseBinaryExpression(self: *Self, precedence: u8) !usize {
             },
             .kind = switch (nextPrecedence) {
                 // Assignments:
-                1 => .{
-                    .assignment = .{
-                        .operator = switch (next.type) {
-                            .ASSIGN => .ASSIGN,
-                            .ADD_ASSIGN => .ADD_ASSIGN,
-                            .SUB_ASSIGN => .SUB_ASSIGN,
-                            .MUL_ASSIGN => .MUL_ASSIGN,
-                            .DIV_ASSIGN => .DIV_ASSIGN,
-                            .MOD_ASSIGN => .MOD_ASSIGN,
-                            .BITWISE_AND_ASSIGN => .BITWISE_AND_ASSIGN,
-                            .BITWISE_OR_ASSIGN => .BITWISE_OR_ASSIGN,
-                            .BITWISE_XOR_ASSIGN => .BITWISE_XOR_ASSIGN,
-                            else => unreachable,
+                1 => blk: {
+                    var assign_op: ?ast.Operator = null;
+
+                    switch (next.type) {
+                        .ASSIGN => break :blk .{
+                            .assignment = .{
+                                .target = left,
+                                .value = right,
+                            },
                         },
-                        .target = left,
-                        .value = right,
-                    },
+                        .ADD_ASSIGN => assign_op = .ADD,
+                        .SUB_ASSIGN => assign_op = .SUBTRACT,
+                        .MUL_ASSIGN => assign_op = .MULTIPLY,
+                        .DIV_ASSIGN => assign_op = .DIVIDE,
+                        .MOD_ASSIGN => assign_op = .MODULO,
+                        .BITWISE_AND_ASSIGN => assign_op = .BITWISE_AND,
+                        .BITWISE_OR_ASSIGN => assign_op = .BITWISE_OR,
+                        .BITWISE_XOR_ASSIGN => assign_op = .BITWISE_XOR,
+                        else => return error.UnexpectedToken,
+                    }
+
+                    const binary_expr_node = try self.tree.addNode(.{
+                        .span = .{
+                            .start = left_node.span.start,
+                            .end = right_node.span.end,
+                        },
+                        .kind = .{
+                            .binary_operator = .{
+                                .left = left,
+                                .operator = assign_op.?,
+                                .right = right,
+                            },
+                        },
+                    });
+
+                    break :blk .{
+                        .assignment = .{
+                            .target = left,
+                            .value = binary_expr_node,
+                        },
+                    };
                 },
                 else => .{
                     .binary_operator = .{
@@ -1022,6 +1046,29 @@ pub fn parseParenthesizedExpr(self: *Self) Self.Error!usize {
     try self.pushSpan();
     defer _ = self.popSpan();
 
+    if (try self.maybe(.RIGHT_PAREN) != null) {
+        if (try self.parseMaybeClosure(&.{})) |closure| {
+            // If we parsed a closure, we return it instead of an empty expression group.
+            return closure;
+        }
+
+        const token = try self.peek();
+
+        return self.reportError(
+            "P004",
+            "Not expected empty parentheses.",
+            .{},
+            error.UnexpectedToken,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .magenta },
+                    .span = token.span.asReportz(),
+                    .message = "Found empty parentheses.",
+                }},
+            },
+        );
+    }
+
     const expr = try self.parseExpression();
 
     if (try self.maybe(.COMMA) != null) {
@@ -1059,9 +1106,28 @@ pub fn parseTuple(self: *Self, first_expression: usize) Self.Error!usize {
         }
     }
 
+    if (try self.parseMaybeClosure(expressions.items)) |closure| {
+        // If we parsed a closure, we return it instead of a tuple.
+        return closure;
+    }
+
     return self.tree.addNode(.{ .span = self.peekSpan(), .kind = .{ .tuple = .{
         .expressions = try expressions.toOwnedSlice(),
     } } });
+}
+
+pub fn parseMaybeClosure(self: *Self, parameters: []usize) !?usize {
+    if (try self.maybe(.ARROW) == null) return null; // This may not be a closure.
+
+    const body = try self.parseCodeBlock();
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .closure = .{
+            .parameters = parameters,
+            .body = body,
+        } },
+    });
 }
 
 pub fn parseArrayLiteral(self: *Self) Self.Error!usize {
@@ -1376,6 +1442,7 @@ test "Parse tuples (multiple)" {
         } },
     }, tuple_node);
 }
+
 test "Parse tuples (multiple with inside tuple)" {
     const source = "(a,b,(c,d),)";
     var lexer: Lexer = .{ .source = source };
@@ -1390,6 +1457,40 @@ test "Parse tuples (multiple with inside tuple)" {
             .expressions = &.{ 1, 3, 8 },
         } },
     }, tuple_node);
+}
+
+test "Parse no-parameter closure" {
+    const source = "() -> { return 10; }";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const closure = try parser.parseExpression();
+    const closure_node = parser.tree.getNodeUnsafe(closure);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 20 },
+        .kind = .{ .closure = .{
+            .parameters = &.{},
+            .body = 2,
+        } },
+    }, closure_node);
+}
+
+test "Parse closure with parameters" {
+    const source = "(a, b) -> { return a + b; }";
+    var lexer: Lexer = .{ .source = source };
+    var parser = Self.init(std.testing.allocator, &lexer);
+    defer parser.deinit(true);
+
+    const closure = try parser.parseExpression();
+    const closure_node = parser.tree.getNodeUnsafe(closure);
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 27 },
+        .kind = .{ .closure = .{
+            .parameters = &.{ 1, 3 },
+            .body = 10,
+        } },
+    }, closure_node);
 }
 
 test "Parse anonymous struct literal expression" {
@@ -1941,9 +2042,8 @@ test "Parse assignment" {
         .span = .{ .start = 0, .end = 10 },
         .kind = .{
             .assignment = .{
-                .operator = .ADD_ASSIGN,
                 .target = 1,
-                .value = 5,
+                .value = 6,
             },
         },
     }, expr_node);
@@ -1955,18 +2055,30 @@ test "Parse assignment" {
         .kind = .{ .identifier = "a" },
     }, target_add_assign);
 
-    // value of '+=': assignment '='
-    const value_add_assign = parser.tree.getNode(5).?;
+    // value of '+=': assignment '=' and later '+'
+    const value_add_assign = parser.tree.getNode(6).?;
+    try std.testing.expectEqualDeep(ast.Node{
+        .span = .{ .start = 0, .end = 10 },
+        .kind = .{
+            .binary_operator = .{
+                .left = 1,
+                .operator = .ADD,
+                .right = 5,
+            },
+        },
+    }, value_add_assign);
+
+    // Left operand of '+='
+    const value_add_assign_expr = parser.tree.getNode(5).?;
     try std.testing.expectEqualDeep(ast.Node{
         .span = .{ .start = 5, .end = 10 },
         .kind = .{
             .assignment = .{
-                .operator = .ASSIGN,
                 .target = 3,
                 .value = 4,
             },
         },
-    }, value_add_assign);
+    }, value_add_assign_expr);
 
     // target of '=': identifier 'b'
     const target_assign = parser.tree.getNode(2).?;

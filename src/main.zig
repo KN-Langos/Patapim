@@ -89,6 +89,7 @@ pub fn main() !void {
         \\      break;
         \\  }
         \\}
+        \\def += abc;
     ;
 
     var lexer: patapim.Lexer = .{ .source = source };

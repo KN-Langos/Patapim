@@ -299,24 +299,7 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
 
     const value = try self.evalNode(tree, assignment.value, env);
 
-    // Set the value in the environment.
-    switch (assignment.operator) {
-        .ASSIGN => try env.set(name, value),
-        // TODO: Implement other assignment operators.
-        else => return self.reportError(
-            "I003",
-            "Unsupported assignment operator: {s}",
-            .{@tagName(assignment.operator)},
-            error.UnsupportedNodeType,
-            .{
-                .labels = &.{.{
-                    .color = .{ .basic = .red },
-                    .span = node.span.asReportz(),
-                    .message = "Unsupported assignment operator.",
-                }},
-            },
-        ),
-    }
+    try env.set(name, value);
 
     // Return the assigned value.
     return value;

@@ -343,6 +343,23 @@ pub fn visitFunctionCall(self: *Self, tree: *const ast.Tree, span: common.Span, 
     try self.writer.writeByte(')');
 }
 
+pub fn visitClosure(self: *Self, tree: *const ast.Tree, span: common.Span, closure: ast.Closure, visitee: anytype) !void {
+    _ = visitee;
+    _ = span;
+
+    try self.writer.writeByte('(');
+    for (closure.parameters) |param| {
+        try self.accept(tree, param);
+        try self.writer.writeAll(", ");
+    }
+    try self.writer.writeAll(") -> {\n");
+    self.indent += 4;
+    try self.accept(tree, closure.body);
+    self.indent -= 4;
+    try self.writeIndent();
+    try self.writer.writeAll("}");
+}
+
 pub fn visitMemberAccess(self: *Self, tree: *const ast.Tree, span: common.Span, access: ast.MemberAccess, visitee: anytype) !void {
     _ = visitee;
     _ = span;
@@ -484,9 +501,9 @@ pub fn visitAssignment(self: *Self, tree: *const ast.Tree, span: common.Span, ex
 
     try self.writer.writeByte('(');
     try self.accept(tree, expr.target);
-    try self.writer.print(" {}{s}{} ", .{
+    try self.writer.print(" {}{}{} ", .{
         ansi.Style{ .foreground = .{ .basic = .bright_magenta } },
-        @tagName(expr.operator),
+        try self.writer.writeByte('='),
         ansi.Style{ .modifiers = .{ .reset = true } },
     });
     try self.accept(tree, expr.value);
