@@ -34,6 +34,7 @@ pub const NodeKind = union(enum) {
     assignment: Assignment,
     expression_group: ExpressionGroup,
     inline_conditional: InlineConditional,
+    closure: Closure,
 
     // ---< Special nodes >---
     module: Module,
@@ -249,6 +250,11 @@ pub const UnaryOperator = struct {
 pub const Assignment = struct {
     target: NodeId,
     value: NodeId, // Expression
+};
+
+pub const Closure = struct {
+    parameters: []const NodeId,
+    body: NodeId,
 };
 
 // Expression group node. This is used to group expressions together.
