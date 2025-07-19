@@ -63,8 +63,32 @@ pub fn main() !void {
         \\    brr x = 3;
         \\    abc = x;
         \\}
+        \\
+        \\
         \\brr xyz = if(abc == 3) 10 else 20;
         \\const pol = abc + def + ghi + xyz;
+        \\brr i = 0;
+        \\while(i<10){
+        \\i = i+1;
+        \\}
+        \\brr j = 2;
+        \\brr even = 0;
+        \\loop
+        \\{
+        \\  loop
+        \\  {
+        \\      j = j +1;
+        \\      if(j >= 10)
+        \\       {
+        \\          break;
+        \\       }
+        \\  }
+        \\  even = even + 1;
+        \\  if(even == 15)
+        \\  {
+        \\      break;
+        \\  }
+        \\}
     ;
 
     var lexer: patapim.Lexer = .{ .source = source };

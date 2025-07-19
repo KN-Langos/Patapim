@@ -18,6 +18,14 @@ diagnostic_log: std.ArrayList(reportz.reports.Diagnostic),
 pub const Self = @This();
 const LOG = std.log.scoped(.interpreter);
 
+pub const FlowControl = enum {
+    NOTHING,
+    BREAK,
+    CONTINUE,
+};
+
+pub var flow_control: FlowControl = .NOTHING;
+
 // Initializes the interpreter with the given AST tree and global environment.
 // The global environment is used to store variables and their values.
 pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree) !Self {
@@ -119,6 +127,10 @@ pub fn interpret(self: *Self, root_id: usize) !void {
 // It dispatches the evaluation to the appropriate handler based on the node type.
 // The node can be a module, code block, expression, or variable declaration.
 pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    if (flow_control != .NOTHING) {
+        return .Void;
+    }
+
     const node = tree.getNode(node_id) orelse return self.reportError(
         "I001",
         "Node with ID {} does not exist.",
@@ -232,6 +244,16 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             return value;
         },
         .conditional => return try self.evalConditional(tree, node, env),
+        .loop => return try self.evalLoop(tree, node, env),
+        .while_loop => return try self.evalWhile(tree, node, env),
+        .break_stmt => {
+            flow_control = .BREAK;
+            return runtime.RuntimeValue.Void;
+        },
+        .continue_stmt => {
+            flow_control = .CONTINUE;
+            return runtime.RuntimeValue.Void;
+        },
         .inline_conditional => return try self.evalInlineConditional(tree, node, env),
         else => {
             LOG.warn("Unsupported node type: {s}", .{@tagName(node.kind)});
@@ -656,6 +678,50 @@ pub fn evalConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: 
 
     // If there is no 'else if' or 'else' block, return Void.
     return runtime.RuntimeValue.Void;
+}
+
+pub fn checkBreak() bool {
+    if (flow_control == .BREAK) {
+        flow_control = .NOTHING;
+        return true;
+    } else {
+        flow_control = .NOTHING;
+        return false;
+    }
+}
+
+pub fn evalLoop(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const loop = node.kind.loop;
+
+    var return_value: runtime.RuntimeValue = runtime.RuntimeValue.Void;
+
+    while (true) {
+        if (checkBreak())
+            break;
+
+        return_value = try self.evalNode(tree, loop.body, env);
+    }
+    return return_value;
+}
+
+pub fn evalWhile(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const while_loop = node.kind.while_loop;
+
+    var condition_value = try self.evalNode(tree, while_loop.condition, env);
+    var condition_bool = isTruthy(condition_value);
+    var return_value: runtime.RuntimeValue = runtime.RuntimeValue.Void;
+
+    while (condition_bool) {
+        if (checkBreak())
+            break;
+
+        return_value = try self.evalNode(tree, while_loop.body, env);
+
+        condition_value = try self.evalNode(tree, while_loop.condition, env);
+        condition_bool = isTruthy(condition_value);
+    }
+
+    return return_value;
 }
 
 pub fn evalInlineConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {

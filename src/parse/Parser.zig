@@ -233,7 +233,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeStructDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeEnumDeclStatement()) |stmt| return stmt;
     if (try self.parseMaybeReturnStatement()) |stmt| return stmt;
-    if (try self.parseMaybeBreakStatement()) |stmt| return stmt;
+    if (try self.parseMaybeFlowControlment()) |stmt| return stmt;
     if (try self.parseMaybeContinueStatement()) |stmt| return stmt;
     // Temporary...
     if (try self.parseMaybeExpressionStatement()) |stmt| return stmt;
@@ -620,7 +620,7 @@ pub fn parseMaybeForLoop(self: *Self) !?usize {
 }
 
 // Parse maybe break statement and return its ID if parsed.
-pub fn parseMaybeBreakStatement(self: *Self) !?usize {
+pub fn parseMaybeFlowControlment(self: *Self) !?usize {
     if (try self.maybe(.KW_BREAK) == null) return null; // This may not be a break statement.
     try self.pushSpan();
     defer _ = self.popSpan();
@@ -1478,7 +1478,7 @@ test "Parse break statement" {
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
 
-    const break_id = (try parser.parseMaybeBreakStatement()).?;
+    const break_id = (try parser.parseMaybeFlowControlment()).?;
     const break_node = parser.tree.getNodeUnsafe(break_id);
 
     try std.testing.expectEqualDeep(ast.Node{
