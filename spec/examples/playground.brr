@@ -108,4 +108,4 @@ brr anonStruct = #{
 (a, b)  -> { ... }
 
 // switch
-TODO
+switch(brr argument, brr case1, fn inCase1, brr case2, fn inCase2, ...);
