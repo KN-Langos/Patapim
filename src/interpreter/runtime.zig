@@ -1,4 +1,5 @@
 const std = @import("std");
+const ast = @import("../parse/ast.zig");
 
 pub const Error = error{
     UndeclaredVariable,
@@ -15,6 +16,7 @@ pub const RuntimeValue = union(enum) {
     Boolean: bool,
     String: []const u8,
     Void: void,
+    Function: FunctionValue,
 
     // Converts the RuntimeValue to a string representation.
     // This is useful for debugging or displaying values.
@@ -25,9 +27,19 @@ pub const RuntimeValue = union(enum) {
             .Float => std.fmt.allocPrint(allocator, "{}", .{self.Float}),
             .Boolean => std.fmt.allocPrint(allocator, "{}", .{self.Boolean}),
             .String => allocator.dupe(u8, self.String),
-            else => unreachable,
+            .Void => allocator.dupe(u8, "void"),
+            .Function => std.fmt.allocPrint(allocator, "Function with body id {}", .{self.Function.body_id}),
         };
     }
+};
+
+// FunctionValue represents a function in the runtime.
+// It contains the parameters of the function, the body of the function,
+// and the environment in which the function was defined.
+pub const FunctionValue = struct {
+    parameters: [][]const u8, // The parameters of the function.
+    body_id: usize, // The function body node.
+    environment: *Environment, // The environment in which the function was defined.
 };
 
 // VariableBinding represents a binding of a variable to a runtime value.
