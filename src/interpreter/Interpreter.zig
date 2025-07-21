@@ -9,6 +9,7 @@ const runtime = @import("runtime.zig");
 allocator: std.mem.Allocator,
 tree: *const ast.Tree,
 global_env: runtime.Environment,
+func_names_arena: std.heap.ArenaAllocator,
 
 // Diagnostics for logging errors.
 // These are untouched until the error occurs.
@@ -18,10 +19,11 @@ diagnostic_log: std.ArrayList(reportz.reports.Diagnostic),
 pub const Self = @This();
 const LOG = std.log.scoped(.interpreter);
 
-pub const FlowControl = enum {
+pub const FlowControl = union(enum) {
     NOTHING,
     BREAK,
     CONTINUE,
+    RETURN: runtime.RuntimeValue,
 };
 
 pub var flow_control: FlowControl = .NOTHING;
@@ -37,6 +39,7 @@ pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree) !Self {
         .global_env = global_environment,
         .diagnostic_arena = .init(allocator),
         .diagnostic_log = .init(allocator),
+        .func_names_arena = std.heap.ArenaAllocator.init(allocator),
     };
 }
 
@@ -48,6 +51,7 @@ pub fn deinit(self: *Self) void {
     self.diagnostic_log.deinit();
     self.diagnostic_arena.deinit();
     self.global_env.deinit();
+    self.func_names_arena.deinit();
 }
 
 // Prints debug information about the interpreter's state.
@@ -128,6 +132,10 @@ pub fn interpret(self: *Self, root_id: usize) !void {
 // The node can be a module, code block, expression, or variable declaration.
 pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     if (flow_control != .NOTHING) {
+        if (flow_control == .RETURN) {
+            return flow_control.RETURN;
+        }
+
         return .Void;
     }
 
@@ -173,7 +181,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             for (code_block) |stmt_id| {
                 result = try self.evalNode(tree, stmt_id, block_env);
             }
-            return result;
+            return runtime.RuntimeValue.Void;
         },
         .integer_literal => runtime.RuntimeValue{ .Integer = @intCast(node.kind.integer_literal) },
         .float_literal => runtime.RuntimeValue{ .Float = node.kind.float_literal },
@@ -243,6 +251,31 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             try env.define(name, value, false);
             return value;
         },
+        .function_def => |function_def| {
+            // Evaluate the function definition.
+            const func_name = try self.getIdentifierName(tree, function_def.name);
+
+            const param_names = try self.func_names_arena.allocator().alloc([]const u8, function_def.parameters.len);
+            for (function_def.parameters, 0..) |param, i| {
+                const param_node = tree.getNode(param).?;
+                const name = try self.getIdentifierName(tree, param_node.kind.parameter.name);
+                param_names[i] = name;
+            }
+
+            // Create a new function value.
+            const function_value = runtime.FunctionValue{
+                .parameters = param_names,
+                .body_id = function_def.body,
+                .environment = env,
+            };
+
+            const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, function_def.parameters.len });
+
+            // Define the function in the environment.
+            try env.define(fn_key, .{ .Function = function_value }, true);
+            return .{ .Function = function_value };
+        },
+        .function_call => return try self.evalFunctionCall(tree, node, env),
         .conditional => return try self.evalConditional(tree, node, env),
         .loop => return try self.evalLoop(tree, node, env),
         .while_loop => return try self.evalWhile(tree, node, env),
@@ -253,6 +286,16 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .continue_stmt => {
             flow_control = .CONTINUE;
             return runtime.RuntimeValue.Void;
+        },
+        .return_stmt => |returnStmt| {
+            if (returnStmt.value == null) {
+                flow_control = .{ .RETURN = runtime.RuntimeValue.Void };
+            } else {
+                const return_value = try self.evalNode(tree, returnStmt.value.?, env);
+                flow_control = .{ .RETURN = return_value };
+            }
+
+            return flow_control.RETURN;
         },
         .inline_conditional => return try self.evalInlineConditional(tree, node, env),
         else => {
@@ -637,6 +680,42 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
             },
         ),
     };
+}
+
+pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const func_call = node.kind.function_call;
+    const target_node = tree.getNode(func_call.target).?;
+    const func_name = try self.getIdentifierName(tree, target_node.kind.variable_ref);
+
+    const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, func_call.arguments.len });
+
+    const func_value = env.get(fn_key) orelse return self.reportError(
+        "I014",
+        "Function '{s}' not found in the current environment.",
+        .{fn_key},
+        error.RuntimeError,
+        .{
+            .labels = &.{.{
+                .color = .{ .basic = .red },
+                .span = node.span.asReportz(),
+                .message = "Function not found.",
+            }},
+        },
+    );
+
+    var func_env = try runtime.Environment.init(self.allocator, func_value.Function.environment, false);
+    defer func_env.deinit();
+
+    for (func_value.Function.parameters, 0..) |param_name, i| {
+        const arg = try self.evalNode(tree, func_call.arguments[i], env);
+        try func_env.define(param_name, arg, true);
+    }
+
+    _ = try self.evalNode(tree, func_value.Function.body_id, &func_env);
+
+    defer flow_control = .NOTHING;
+
+    return if (flow_control == .RETURN) flow_control.RETURN else runtime.RuntimeValue.Void;
 }
 
 pub fn evalConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {

@@ -47,8 +47,8 @@ loop
 
 def += abc;
 
+fn add(x, y) {
+    return x + y;
+}
 
-
-
-
-
+brr result = add(2, def-1);
