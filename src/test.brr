@@ -47,8 +47,10 @@ loop
 
 def += abc;
 
-
-
-
-
+brr array = [1,2,3,4];
+brr array2 = [1, 2.5, "ziemniak"];
+brr cba  = array2[1];
+brr aaa = array2[2];
+array2[0] = 3;
+brr length = array2.len;
 

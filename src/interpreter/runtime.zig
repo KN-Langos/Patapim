@@ -14,6 +14,7 @@ pub const RuntimeValue = union(enum) {
     Float: f64,
     Boolean: bool,
     String: []const u8,
+    Array: std.ArrayList(RuntimeValue),
     Void: void,
 
     // Converts the RuntimeValue to a string representation.
@@ -21,10 +22,30 @@ pub const RuntimeValue = union(enum) {
     // It allocates memory for the string representation, so it should be used with care.
     pub fn toString(self: RuntimeValue, allocator: std.mem.Allocator) ![]u8 {
         return switch (self) {
-            .Integer => std.fmt.allocPrint(allocator, "{}", .{self.Integer}),
-            .Float => std.fmt.allocPrint(allocator, "{}", .{self.Float}),
-            .Boolean => std.fmt.allocPrint(allocator, "{}", .{self.Boolean}),
-            .String => allocator.dupe(u8, self.String),
+            .Integer => |i| std.fmt.allocPrint(allocator, "{}", .{i}),
+            .Float => |f| std.fmt.allocPrint(allocator, "{}", .{f}),
+            .Boolean => |b| std.fmt.allocPrint(allocator, "{}", .{b}),
+            .String => |s| allocator.dupe(u8, s),
+            .Array => |array| {
+                var string = std.ArrayList(u8).init(allocator);
+                defer string.deinit();
+
+                try string.append('[');
+
+                for (array.items, 0..) |element, index| {
+                    const element_string = try toString(element, allocator);
+                    defer allocator.free(element_string);
+
+                    try string.appendSlice(element_string);
+
+                    if (index != self.Array.items.len - 1) {
+                        try string.append(',');
+                    } else {
+                        try string.append(']');
+                    }
+                }
+                return string.toOwnedSlice();
+            },
             else => unreachable,
         };
     }
@@ -53,6 +74,7 @@ pub const Environment = struct {
     parent: ?*Environment,
     values: std.StringHashMap(VariableBinding),
     is_top_level: bool = false, // Indicates if this is the top-level environment.
+    arena_allocator: std.heap.ArenaAllocator,
 
     // Initializes a new environment with an optional parent environment.
     // The parent environment allows for variable lookups in outer scopes.
@@ -62,6 +84,7 @@ pub const Environment = struct {
             .parent = parent,
             .values = std.StringHashMap(VariableBinding).init(allocator),
             .is_top_level = is_top_level,
+            .arena_allocator = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
@@ -70,6 +93,7 @@ pub const Environment = struct {
     // This should be called when the environment is no longer needed.
     pub fn deinit(self: *Environment) void {
         self.values.deinit();
+        self.arena_allocator.deinit();
     }
 
     // Gets the value associated with the given key in the environment.
