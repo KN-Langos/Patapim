@@ -419,7 +419,7 @@ fn lexOperators(self: *Self) TokenType {
 fn lexIdentifierOrKW(self: *Self) TokenType {
     // Parse until end of identifier.
     var char = self.source[self.current];
-    while (!self.isAtEnd() and std.ascii.isAlphanumeric(char) or char == '-' or char == '_') {
+    while (!self.isAtEnd() and std.ascii.isAlphanumeric(char) or char == '_') {
         self.current += 1;
         if (!self.isAtEnd()) char = self.source[self.current];
     }

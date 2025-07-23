@@ -1,4 +1,5 @@
 const std = @import("std");
+const ast = @import("../parse/ast.zig");
 
 pub const Error = error{
     UndeclaredVariable,
@@ -16,6 +17,7 @@ pub const RuntimeValue = union(enum) {
     String: []const u8,
     Array: std.ArrayList(RuntimeValue),
     Void: void,
+    Function: FunctionValue,
 
     // Converts the RuntimeValue to a string representation.
     // This is useful for debugging or displaying values.
@@ -46,9 +48,20 @@ pub const RuntimeValue = union(enum) {
                 }
                 return string.toOwnedSlice();
             },
+            .Void => allocator.dupe(u8, "void"),
+            .Function => std.fmt.allocPrint(allocator, "Function with body id {}", .{self.Function.body_id}),
             else => unreachable,
         };
     }
+};
+
+// FunctionValue represents a function in the runtime.
+// It contains the parameters of the function, the body of the function,
+// and the environment in which the function was defined.
+pub const FunctionValue = struct {
+    parameters: [][]const u8, // The parameters of the function.
+    body_id: usize, // The function body node.
+    environment: *Environment, // The environment in which the function was defined.
 };
 
 // VariableBinding represents a binding of a variable to a runtime value.
