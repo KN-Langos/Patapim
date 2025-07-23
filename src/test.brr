@@ -6,7 +6,7 @@ ghi = ghi + (1 * 0.5);
 
 if(abc < def) {
     brr x = 1;
-    abc = x;
+    abc = u;
 } else if(2 > 3) {
     brr x = 2;
     abc = x;

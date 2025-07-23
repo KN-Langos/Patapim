@@ -26,6 +26,14 @@ pub fn build(b: *std.Build) void {
     const reportz_lib = reportz_dep.module("reportz");
     lib_mod.addImport("reportz", reportz_lib);
 
+    const zli_dep = b.dependency("zli", .{
+        .target = target,
+        // .optimize = optimize,
+    });
+    const zli_lib = zli_dep.module("zli");
+    exe_mod.addImport("zli", zli_lib);
+    exe_mod.addImport("reportz", reportz_lib);
+
     // Link and configure everything.
     exe_mod.addImport("patapim", lib_mod);
 

@@ -2,6 +2,8 @@
 
 const std = @import("std");
 
+const reportz = @import("reportz");
+
 const common = @import("../common.zig");
 const ast = @import("../parse/ast.zig");
 const visitor = @import("../visitor.zig");
@@ -13,13 +15,52 @@ pub const NameResolutionError = error{
 const Visitor = visitor.Visitor(ast.Node, @This(), NameResolutionError, void{});
 pub usingnamespace Visitor;
 
+source_id: []const u8,
 metadata: *Metadata,
 current_nodeid: usize = 0, // This will be modified by visitor.
 
-// TODO: Implement error diagnostics.
+diagnostic_alloc: std.mem.Allocator, // This could be better.
+diagnostic_log: std.ArrayList(reportz.reports.Diagnostic),
 
 const Self = @This();
 const LOG = std.log.scoped(.name_resolution_pass);
+
+pub fn reportError(
+    self: *Self,
+    code: []const u8,
+    comptime message_fmt: []const u8,
+    message_args: anytype,
+    error_type: Self.NameResolutionError,
+    additional_options: struct {
+        severity: reportz.reports.Severity = .@"error",
+        labels: []const reportz.reports.Label,
+        notes: []const reportz.reports.Note = &.{},
+    },
+) Self.NameResolutionError {
+    @branchHint(.cold);
+
+    const diagnostic_alloc = self.diagnostic_alloc;
+
+    try self.diagnostic_log.append(reportz.reports.Diagnostic{
+        .source_id = self.source_id,
+        .severity = additional_options.severity,
+        .code = code,
+        .message = try std.fmt.allocPrint(diagnostic_alloc, message_fmt, message_args),
+        // This ensures that labels and notes live at least as long as diagnostic_log field.
+        .labels = try common.deepClone(
+            []const reportz.reports.Label,
+            additional_options.labels,
+            diagnostic_alloc,
+        ),
+        .notes = try common.deepClone(
+            []const reportz.reports.Note,
+            additional_options.notes,
+            diagnostic_alloc,
+        ),
+    });
+
+    return error_type;
+}
 
 pub fn visitFunctionDef(self: *Self, tree: *const ast.Tree, span: common.Span, def: ast.FunctionDef, visitee: anytype) !void {
     _ = visitee;
@@ -81,8 +122,20 @@ pub fn visitVariableRef(self: *Self, tree: *const ast.Tree, span: common.Span, i
             found,
         });
     } else {
-        return error.UnknownVariable;
-        // TODO: Implement error diagnostics.
+        const node_span = tree.getNodeUnsafe(ident).span;
+        return self.reportError(
+            "A001",
+            "Variable with name '{s}' does not exist here.",
+            .{var_name},
+            error.UnknownVariable,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .magenta },
+                    .span = node_span.asReportz(),
+                    .message = "Name referenced here.",
+                }},
+            },
+        );
     }
 }
 

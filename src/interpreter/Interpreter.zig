@@ -6,6 +6,7 @@ const common = @import("../common.zig");
 const ast = @import("../parse/ast.zig");
 const runtime = @import("runtime.zig");
 
+source_id: []const u8,
 allocator: std.mem.Allocator,
 tree: *const ast.Tree,
 global_env: runtime.Environment,
@@ -30,10 +31,11 @@ pub var flow_control: FlowControl = .NOTHING;
 
 // Initializes the interpreter with the given AST tree and global environment.
 // The global environment is used to store variables and their values.
-pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree) !Self {
+pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree, source_id: []const u8) !Self {
     const global_environment = try runtime.Environment.init(allocator, null, true);
 
     return Self{
+        .source_id = source_id,
         .allocator = allocator,
         .tree = tree,
         .global_env = global_environment,
@@ -100,7 +102,7 @@ pub fn reportError(
     const diagnostic_alloc = self.diagnostic_arena.allocator();
 
     try self.diagnostic_log.append(reportz.reports.Diagnostic{
-        .source_id = "unknown", // TODO: Set source ID properly.
+        .source_id = self.source_id,
         .severity = additional_options.severity,
         .code = code,
         .message = try std.fmt.allocPrint(diagnostic_alloc, message_fmt, message_args),
