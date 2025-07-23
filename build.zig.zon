@@ -23,8 +23,8 @@
             .hash = "reportz-0.1.0-IFVX6nAgAQDwJf13WjDpXkGOq5PcCpyCJbQ6nvK7oz39",
         },
         .zli = .{
-            .url = "https://github.com/xcaeser/zli/archive/v3.7.0.tar.gz",
-            .hash = "zli-3.7.0-LeUjpq8uAQCl8uh-ws3jdXsnbCwMZQgcZQx4TVXHLSeQ",
+            .url = "git+https://github.com/olix3001/zli#d8d787c7cf0d6de95a364746112f2c3901d68fd0",
+            .hash = "zli-3.7.1-LeUjpgE3AQAkJqC3-cmeHGKFOWLj-m9SSY_sEwzqk2UB",
         },
     },
     .paths = .{
