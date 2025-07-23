@@ -50,7 +50,6 @@ pub const RuntimeValue = union(enum) {
             },
             .Void => allocator.dupe(u8, "void"),
             .Function => std.fmt.allocPrint(allocator, "Function with body id {}", .{self.Function.body_id}),
-            else => unreachable,
         };
     }
 };
