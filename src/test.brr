@@ -1,3 +1,4 @@
+
 brr abc = 2+2;
 brr def = 2*2;
 brr ghi = def - abc;
@@ -47,8 +48,21 @@ loop
 
 def += abc;
 
+//array test
+brr array = [1,2,3,4];
+brr array2 = [1, 2.5, "ziemniak"];
+brr cba  = array2[1];
+brr aaa = array2[2];
+array2[0] = 2;
+brr length = array2.len;
+aaa = array2[array[1]];
+brr bbb = array2[array2[0]];
+brr array2D = [[1,2], [3,4,5],[6,7,8]];
+brr ccc = array2D[0][0];
+
 fn add(x, y) {
     return x + y;
 }
 
 brr result = add(2, def-1);
+
