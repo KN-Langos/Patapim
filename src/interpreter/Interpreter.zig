@@ -76,6 +76,8 @@ pub const Error = error{
     InvalidTypeForBinaryOperation,
     DivisionByZero,
     WrongArgumentForSpread,
+    IndexOutOfBounds,
+    IndexNotAnInteger,
 } || runtime.Error || std.mem.Allocator.Error;
 
 // Reports an error with the given code, message format, and arguments.
@@ -180,7 +182,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .indexed_access => evalIndexedAccess(self, tree, node, env),
         .member_access => {
             const member_access = node.kind.member_access;
-            // this was stolen from another function, it could need some changes
+            // this was stolen from another function, it could need some changes TODO: extract to outer function
             const member = tree.getNode(member_access.member) orelse return self.reportError(
                 "I001",
                 "Node with ID {} does not exist.",
@@ -341,10 +343,39 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
             const array = try evalNode(self, tree, name_node.kind.indexed_access.target, env);
 
             //implement error handling
-            if (index != .Integer) {}
-            if (index.Integer < 0) {}
+            if (index != .Integer) {
+                return self.reportError(
+                    "I012",
+                    "Index not an integer, found instead {s}.",
+                    .{@tagName(index)},
+                    error.IndexNotAnInteger,
+                    .{
+                        .labels = &.{.{
+                            .color = .{ .basic = .red },
+                            .span = node.span.asReportz(),
+                            .message = "must use Integer as index",
+                        }},
+                    },
+                );
+            }
+
+            if (index.Integer < 0 or index.Integer > array.Array.items.len) {
+                return self.reportError(
+                    "I011",
+                    "Index out of bounds {d}.",
+                    .{index.Integer},
+                    error.IndexOutOfBounds,
+                    .{
+                        .labels = &.{.{
+                            .color = .{ .basic = .red },
+                            .span = node.span.asReportz(),
+                            .message = "Node index out of bounds.",
+                        }},
+                    },
+                );
+            }
             const array_index: usize = @intCast(index.Integer);
-            if (index.Integer > array.Array.items.len) {}
+
             array.Array.items[array_index] = value;
             // break early to skip changes in environment
             return value;
@@ -826,6 +857,7 @@ fn getIdentifierName(self: *Self, tree: *const ast.Tree, node_id: usize) Self.Er
 
     return identifier;
 }
+
 // must be used on floats or ints only
 fn addOne(value: runtime.RuntimeValue) runtime.RuntimeValue {
     var return_val: runtime.RuntimeValue = value;
@@ -841,7 +873,8 @@ fn addOne(value: runtime.RuntimeValue) runtime.RuntimeValue {
     }
     return return_val;
 }
-//helper function for spreads in arrays
+
+//helper function for spreads in arrays maybe to be reimplemented or deleted in future
 fn compare(self: *Self, t1: runtime.RuntimeValue, t2: runtime.RuntimeValue) Self.Error!isize {
     const Tag = std.meta.Tag(runtime.RuntimeValue);
     const tag1 = @as(Tag, t1);
@@ -871,6 +904,7 @@ fn compare(self: *Self, t1: runtime.RuntimeValue, t2: runtime.RuntimeValue) Self
         }} }),
     };
 }
+
 pub fn evalArrayLiteral(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const array_literal = node.kind.array_literal;
 
@@ -880,61 +914,66 @@ pub fn evalArrayLiteral(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
     for (array_literal.elements) |element| {
         try return_array.append(try evalNode(self, tree, element, env));
     }
-    if (array_literal.spread == null)
+
+    if (array_literal.spread == null) {
         return runtime.RuntimeValue{
             .Array = return_array,
         };
-    // this is meant to be rewritten, leaving it here if it's ever needed
-    var spread_start: runtime.RuntimeValue = return_array.getLast();
-    const spread_end: runtime.RuntimeValue = try evalNode(self, tree, array_literal.spread.?, env);
-
-    if (spread_start == runtime.RuntimeValue.Array or spread_start == runtime.RuntimeValue.String or spread_start == runtime.RuntimeValue.Void) {
-        return self.reportError(
-            "I009",
-            "Spread must be made of numeric types, found instead {s}",
-            .{@tagName(spread_start)},
-            error.WrongArgumentForSpread,
-            .{
-                .labels = &.{.{
-                    .color = .{ .basic = .red },
-                    .span = .{ .start = 0, .end = 1 },
-                    .message = "Invalid type.",
-                }}, // to be corrected if nescessary, kinda don't know how the second part of error reporting works
-            },
-        );
-    }
-    if (spread_end == runtime.RuntimeValue.Array or spread_end == runtime.RuntimeValue.String or spread_end == runtime.RuntimeValue.Void) {
-        return self.reportError(
-            "I009",
-            "Spread must be made of numeric types, found instead {s}",
-            .{@tagName(spread_end)},
-            error.WrongArgumentForSpread,
-            .{
-                .labels = &.{.{
-                    .color = .{ .basic = .red },
-                    .span = .{ .start = 0, .end = 1 },
-                    .message = "Invalid type.",
-                }}, // to be corrected if nescessary, kinda don't know how the second part of error reporting works
-            },
-        );
-    }
-    spread_start = addOne(spread_start);
-
-    while (try compare(self, spread_end, spread_start) >= 0) {
-        try return_array.append(spread_start);
-        spread_start = addOne(spread_start);
     }
 
-    return runtime.RuntimeValue{ .Array = return_array };
+    return self.reportError(
+        "I006",
+        "Unsupported node type: {s}",
+        .{@tagName(node.kind)},
+        error.UnsupportedNodeType,
+        .{
+            .labels = &.{.{
+                .color = .{ .basic = .red },
+                .span = node.span.asReportz(),
+                .message = "Unsupported node type.",
+            }},
+        },
+    );
 }
+
 pub fn evalIndexedAccess(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const index_access = node.kind.indexed_access;
     const index = try evalNode(self, tree, index_access.index, env);
-    // critical TODO: implement error support
-    if (index != .Integer) {}
-    if (index.Integer < 0) {}
-    const usize_index: usize = @intCast(index.Integer);
     const target = try evalNode(self, tree, index_access.target, env);
-    if (target != .Array) {}
+
+    if (index != .Integer) {
+        return self.reportError(
+            "I012",
+            "Index not an integer, found instead {s}.",
+            .{@tagName(index)},
+            error.IndexNotAnInteger,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .red },
+                    .span = node.span.asReportz(),
+                    .message = "must use Integer as index",
+                }},
+            },
+        );
+    }
+
+    if (index.Integer < 0 or index.Integer > target.Array.items.len) {
+        return self.reportError(
+            "I011",
+            "Index out of bounds {d}.",
+            .{index.Integer},
+            error.IndexOutOfBounds,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .red },
+                    .span = node.span.asReportz(),
+                    .message = "Node index out of bounds.",
+                }},
+            },
+        );
+    }
+
+    const usize_index: usize = @intCast(index.Integer);
+
     return target.Array.items[usize_index];
 }
