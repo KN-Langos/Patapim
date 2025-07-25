@@ -1,5 +1,7 @@
 const std = @import("std");
+
 const ast = @import("../parse/ast.zig");
+const Interpreter = @import("Interpreter.zig");
 
 pub const Error = error{
     UndeclaredVariable,
@@ -15,9 +17,10 @@ pub const RuntimeValue = union(enum) {
     Float: f64,
     Boolean: bool,
     String: []const u8,
-    Array: std.ArrayList(RuntimeValue),
+    Array: *std.ArrayList(RuntimeValue),
     Void: void,
     Function: FunctionValue,
+    IntrinsicFunction: IntrinsicFunctionValue,
 
     // Converts the RuntimeValue to a string representation.
     // This is useful for debugging or displaying values.
@@ -50,6 +53,7 @@ pub const RuntimeValue = union(enum) {
             },
             .Void => allocator.dupe(u8, "void"),
             .Function => std.fmt.allocPrint(allocator, "Function with body id {}", .{self.Function.body_id}),
+            .IntrinsicFunction => |ptr| std.fmt.allocPrint(allocator, "Intrinsic function at {*}", .{ptr.ptr}),
         };
     }
 };
@@ -61,6 +65,10 @@ pub const FunctionValue = struct {
     parameters: [][]const u8, // The parameters of the function.
     body_id: usize, // The function body node.
     environment: *Environment, // The environment in which the function was defined.
+};
+
+pub const IntrinsicFunctionValue = struct {
+    ptr: *const fn (?RuntimeValue, []const RuntimeValue, *Environment) Interpreter.Error!RuntimeValue,
 };
 
 // VariableBinding represents a binding of a variable to a runtime value.
@@ -87,6 +95,7 @@ pub const Environment = struct {
     values: std.StringHashMap(VariableBinding),
     is_top_level: bool = false, // Indicates if this is the top-level environment.
     arena_allocator: std.heap.ArenaAllocator,
+    this_context: ?RuntimeValue = null,
 
     // Initializes a new environment with an optional parent environment.
     // The parent environment allows for variable lookups in outer scopes.
