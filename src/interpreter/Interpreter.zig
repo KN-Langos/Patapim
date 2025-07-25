@@ -82,7 +82,8 @@ pub const Error = error{
     WrongArgumentForSpread,
     IndexOutOfBounds,
     IndexNotAnInteger,
-} || runtime.Error || std.mem.Allocator.Error;
+    NativeFunctionLoadError,
+} || runtime.Error || std.DynLib.Error || std.mem.Allocator.Error;
 
 // Reports an error with the given code, message format, and arguments.
 // It appends the error to the diagnostic log and returns the specified error type.
@@ -314,9 +315,10 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, function_def.parameters.len });
 
             // Define the function in the environment.
-            try env.define(fn_key, .{ .Function = function_value }, true);
+            try env.define(fn_key, .{ .Function = function_value }, false);
             return .{ .Function = function_value };
         },
+        .native_function_decl => self.evalNativeFunctionDeclaration(tree, node, env),
         .function_call => return try self.evalFunctionCall(tree, node, env),
         .conditional => return try self.evalConditional(tree, node, env),
         .loop => return try self.evalLoop(tree, node, env),
@@ -766,6 +768,55 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
     };
 }
 
+// Evaluates a native function declaration.
+// It loads the native function from a shared library and registers it in the environment.
+pub fn evalNativeFunctionDeclaration(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const native_function_decl = node.kind.native_function_decl;
+
+    // Evaluate the native function declaration.
+    const func_name = try self.getIdentifierName(tree, native_function_decl.name);
+    const parsed_abi = try parseAbiString(tree, native_function_decl.abi.?);
+
+    var library = try std.DynLib.open(parsed_abi.lib);
+
+    const symbol_name = if (parsed_abi.sym) |sym| sym else func_name;
+
+    const symbol_name_with_null = try std.mem.concat(self.allocator, u8, &[_][]const u8{ symbol_name, "\x00" });
+    defer self.allocator.free(symbol_name_with_null);
+
+    const fn_ptr = library.lookup(*const fn (*const runtime.RuntimeValue, usize, *runtime.RuntimeValue) callconv(.C) void, symbol_name_with_null[0 .. symbol_name_with_null.len - 1 :0]) orelse return self.reportError(
+        "I017",
+        "Failed to load native function '{s}' from library '{s}'.",
+        .{ symbol_name, parsed_abi.lib },
+        error.NativeFunctionLoadError,
+        .{
+            .labels = &.{.{
+                .color = .{ .basic = .red },
+                .span = node.span.asReportz(),
+                .message = "Failed to load native function.",
+            }},
+        },
+    );
+
+    const params = try self.func_names_arena.allocator().alloc(runtime.NativeFunctionValue.Arg, native_function_decl.parameters.len);
+    for (native_function_decl.parameters, 0..) |param, i| {
+        const param_node = tree.getNode(param).?;
+        const name = try self.getIdentifierName(tree, param_node.kind.native_parameter.name);
+        params[i] = .{ .name = name, .type = param_node.kind.native_parameter.type };
+    }
+
+    const native_function_value = runtime.NativeFunctionValue{
+        .name = func_name,
+        .parameters = params,
+        .fn_ptr = fn_ptr,
+    };
+
+    const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, native_function_decl.parameters.len });
+
+    try env.define(fn_key, .{ .NativeFunction = native_function_value }, false);
+    return .{ .NativeFunction = native_function_value };
+}
+
 pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const func_call = node.kind.function_call;
     const target_node = tree.getNode(func_call.target).?;
@@ -787,19 +838,108 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
         },
     );
 
-    var func_env = try runtime.Environment.init(self.allocator, func_value.Function.environment, false);
-    defer func_env.deinit();
+    switch (func_value) {
+        .Function => {
+            var func_env = try runtime.Environment.init(self.allocator, func_value.Function.environment, false);
+            defer func_env.deinit();
 
-    for (func_value.Function.parameters, 0..) |param_name, i| {
-        const arg = try self.evalNode(tree, func_call.arguments[i], env);
-        try func_env.define(param_name, arg, true);
+            if (func_call.arguments.len != func_value.Function.parameters.len) {
+                return self.reportError(
+                    "I014",
+                    "Function '{s}' expects {d} arguments, but got {d}.",
+                    .{ fn_key, func_value.Function.parameters.len, func_call.arguments.len },
+                    error.RuntimeError,
+                    .{
+                        .labels = &.{.{
+                            .color = .{ .basic = .red },
+                            .span = node.span.asReportz(),
+                            .message = "Argument count mismatch.",
+                        }},
+                    },
+                );
+            }
+
+            for (func_value.Function.parameters, 0..) |param_name, i| {
+                const arg = try self.evalNode(tree, func_call.arguments[i], env);
+                try func_env.define(param_name, arg, true);
+            }
+
+            _ = try self.evalNode(tree, func_value.Function.body_id, &func_env);
+
+            defer flow_control = .NOTHING;
+
+            return if (flow_control == .RETURN) flow_control.RETURN else runtime.RuntimeValue.Void;
+        },
+        .NativeFunction => |native_fn| {
+            // Prepare the arguments for the native function.
+            const args = try self.allocator.alloc(runtime.RuntimeValue, func_call.arguments.len);
+            defer self.allocator.free(args);
+
+            if (func_call.arguments.len != native_fn.parameters.len) {
+                return self.reportError(
+                    "I014",
+                    "Function '{s}' expects {d} arguments, but got {d}.",
+                    .{ fn_key, native_fn.parameters.len, func_call.arguments.len },
+                    error.RuntimeError,
+                    .{
+                        .labels = &.{.{
+                            .color = .{ .basic = .red },
+                            .span = node.span.asReportz(),
+                            .message = "Argument count mismatch.",
+                        }},
+                    },
+                );
+            }
+
+            for (func_call.arguments, 0..) |arg_id, i| {
+                args[i] = try self.evalNode(tree, arg_id, env);
+                const runtime_type: ast.Type = switch (args[i]) {
+                    .Integer => .Int,
+                    .Float => .Float,
+                    .String => .String,
+                    .Boolean => .Bool,
+                    .Array => .Array,
+                    .Function => .Function,
+                    .NativeFunction => .Function,
+                    .Void => .Unknown,
+                };
+
+                if (native_fn.parameters[i].type != .Unknown and native_fn.parameters[i].type != runtime_type) {
+                    return self.reportError(
+                        "I015",
+                        "Function '{s}' parameter {d} expects type {s}, but got {s}.",
+                        .{ fn_key, i, @tagName(native_fn.parameters[i].type), @tagName(runtime_type) },
+                        error.RuntimeError,
+                        .{
+                            .labels = &.{.{
+                                .color = .{ .basic = .red },
+                                .span = node.span.asReportz(),
+                                .message = "Argument type mismatch.",
+                            }},
+                        },
+                    );
+                }
+            }
+
+            // Call the native function.
+            var result: runtime.RuntimeValue = runtime.RuntimeValue.Void;
+            native_fn.fn_ptr(&args[0], args.len, &result);
+            return result;
+        },
+        else => return self.reportError(
+            "I013",
+            "Function '{s}' is not callable.",
+            .{fn_key},
+            error.RuntimeError,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .red },
+                    .span = node.span.asReportz(),
+                    .message = "Function is not callable.",
+                }},
+            },
+        ),
     }
-
-    _ = try self.evalNode(tree, func_value.Function.body_id, &func_env);
-
-    defer flow_control = .NOTHING;
-
-    return if (flow_control == .RETURN) flow_control.RETURN else runtime.RuntimeValue.Void;
 }
 
 pub fn evalConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
@@ -1055,4 +1195,35 @@ pub fn evalIndexedAccess(self: *Self, tree: *const ast.Tree, node: ast.Node, env
     const usize_index: usize = @intCast(index.Integer);
 
     return target.Array.items[usize_index];
+}
+
+const AbiParts = struct {
+    lib: []const u8,
+    sym: ?[]const u8,
+};
+
+fn parseAbiString(tree: *const ast.Tree, abi: usize) Self.Error!AbiParts {
+    const abi_node = tree.getNode(abi) orelse return error.InvalidNodeId;
+
+    const abi_str = switch (abi_node.kind) {
+        .string_literal => |s| s,
+        else => return error.UnsupportedNodeType,
+    };
+
+    const last_slash = std.mem.lastIndexOfScalar(u8, abi_str, '/');
+    const last_dot = std.mem.lastIndexOfScalar(u8, abi_str, '.');
+
+    // Check if it's in form of path/to/lib.so/symbol
+    if (last_slash) |i| {
+        if (last_dot) |dot| {
+            if (dot < i) {
+                const lib = abi_str[0..i];
+                const sym = abi_str[i + 1 ..];
+                return AbiParts{ .lib = lib, .sym = sym };
+            }
+        }
+    }
+
+    // fallback: path is just a library with no symbol
+    return AbiParts{ .lib = abi_str, .sym = null };
 }

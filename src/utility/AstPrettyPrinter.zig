@@ -192,10 +192,12 @@ pub fn visitNativeParameter(self: *Self, tree: *const ast.Tree, span: common.Spa
     _ = visitee;
 
     try self.accept(tree, param.name);
-    if (param.type) |typ| {
-        try self.writer.writeAll(": ");
-        try self.accept(tree, typ);
-    }
+    try self.writer.writeAll(": ");
+    try self.writer.print("{}{s}{}", .{
+        ansi.Style{ .foreground = .{ .basic = .bright_magenta } },
+        @tagName(param.type),
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
 }
 
 pub fn visitVariable(self: *Self, tree: *const ast.Tree, span: common.Span, variable: ast.Variable, visitee: anytype) !void {

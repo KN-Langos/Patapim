@@ -165,7 +165,7 @@ pub const NativeFunctionDecl = struct {
 // and assuming this function is made specifically for Patapim language.
 pub const NativeParameter = struct {
     name: NodeId,
-    type: ?NodeId,
+    type: Type = .Unknown,
 };
 
 // This is a return statement. This is equivalent to the following code:
@@ -304,4 +304,14 @@ pub const Operator = enum {
     RANGE, // '..' (used in for loops)
 
     UNKNOWN,
+};
+
+pub const Type = enum {
+    Int,
+    Float,
+    Bool,
+    String,
+    Function,
+    Array,
+    Unknown,
 };

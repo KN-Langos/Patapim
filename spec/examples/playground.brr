@@ -60,6 +60,7 @@ brr something = "";
 // Native bindings (ważne!!!)
 native "lib.so/add" fn myAdd();
 native "lib.so" fn add();
+// You can skip arguments types
 
 // Error model
 return 1; // Zwraca 1 jako wartość

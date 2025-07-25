@@ -18,6 +18,7 @@ pub const RuntimeValue = union(enum) {
     Array: std.ArrayList(RuntimeValue),
     Void: void,
     Function: FunctionValue,
+    NativeFunction: NativeFunctionValue,
 
     // Converts the RuntimeValue to a string representation.
     // This is useful for debugging or displaying values.
@@ -50,6 +51,7 @@ pub const RuntimeValue = union(enum) {
             },
             .Void => allocator.dupe(u8, "void"),
             .Function => std.fmt.allocPrint(allocator, "Function with body id {}", .{self.Function.body_id}),
+            .NativeFunction => std.fmt.allocPrint(allocator, "Native function: {s} from library.", .{self.NativeFunction.name}),
         };
     }
 };
@@ -61,6 +63,17 @@ pub const FunctionValue = struct {
     parameters: [][]const u8, // The parameters of the function.
     body_id: usize, // The function body node.
     environment: *Environment, // The environment in which the function was defined.
+};
+
+pub const NativeFunctionValue = struct {
+    name: []const u8, // The name of the native function.
+    parameters: []const Arg, // The parameters of the native function.
+    fn_ptr: *const fn (*const RuntimeValue, usize, *RuntimeValue) callconv(.C) void,
+
+    pub const Arg = struct {
+        name: []const u8,
+        type: ast.Type,
+    };
 };
 
 // VariableBinding represents a binding of a variable to a runtime value.
