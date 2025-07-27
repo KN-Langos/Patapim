@@ -958,7 +958,17 @@ pub fn parsePostfix(self: *Self, operand: usize) Self.Error!usize {
             .DOT => {
                 _ = try self.expect(.DOT);
 
-                const member = try self.expectIdentifier();
+                // In case of tuple access, we can have a not standard accessor - number not an identifier.
+                const member = switch ((try self.peek()).type) {
+                    .INTEGER_LITERAL => blk: {
+                        const integer_token = try self.expect(.INTEGER_LITERAL);
+                        break :blk try self.tree.addNode(.{
+                            .span = integer_token.span,
+                            .kind = .{ .integer_literal = integer_token.literal.integer },
+                        });
+                    },
+                    else => try self.expectIdentifier(),
+                };
 
                 expr = try self.tree.addNode(.{
                     .span = self.peekSpan(),

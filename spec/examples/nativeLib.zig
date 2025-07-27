@@ -1,4 +1,4 @@
-// This is a Zig file that defines a native library for runtime values and a Fibonacci function.
+// This is a Zig file that defines a native library for runtime values and an add function.
 // You can make your own native functions by defining them in this way.
 const std = @import("std");
 

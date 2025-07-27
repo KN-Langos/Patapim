@@ -101,7 +101,7 @@ pub const Const = struct {
 };
 
 //Tuple structure, this is equivalent to the following code:
-//
+// `(expression1, expression2, ...)`
 pub const Tuple: type = struct {
     expressions: []const NodeId,
 };
@@ -313,5 +313,6 @@ pub const Type = enum {
     String,
     Function,
     Array,
+    Tuple,
     Unknown,
 };

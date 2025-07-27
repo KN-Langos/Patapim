@@ -18,6 +18,7 @@ pub const RuntimeValue = union(enum) {
     Boolean: bool,
     String: []const u8,
     Array: *std.ArrayList(RuntimeValue),
+    Tuple: []const RuntimeValue,
     Void: void,
     Function: FunctionValue,
     NativeFunction: NativeFunctionValue,
@@ -50,6 +51,21 @@ pub const RuntimeValue = union(enum) {
                         try string.append(']');
                     }
                 }
+                return string.toOwnedSlice();
+            },
+            .Tuple => |tuple| {
+                var string = std.ArrayList(u8).init(allocator);
+                defer string.deinit();
+
+                try string.append('(');
+                for (tuple, 0..) |el, i| {
+                    const s = try el.toString(allocator);
+                    defer allocator.free(s);
+
+                    try string.appendSlice(s);
+                    if (i != tuple.len - 1) try string.appendSlice(", ");
+                }
+                try string.append(')');
                 return string.toOwnedSlice();
             },
             .Void => allocator.dupe(u8, "void"),
