@@ -11,7 +11,7 @@ source_id: []const u8,
 allocator: std.mem.Allocator,
 tree: *const ast.Tree,
 global_env: runtime.Environment,
-func_names_arena: std.heap.ArenaAllocator,
+mem_alloc_arena: std.heap.ArenaAllocator,
 
 // Diagnostics for logging errors.
 // These are untouched until the error occurs.
@@ -42,7 +42,7 @@ pub fn init(allocator: std.mem.Allocator, tree: *const ast.Tree, source_id: []co
         .global_env = global_environment,
         .diagnostic_arena = .init(allocator),
         .diagnostic_log = .init(allocator),
-        .func_names_arena = std.heap.ArenaAllocator.init(allocator),
+        .mem_alloc_arena = std.heap.ArenaAllocator.init(allocator),
     };
 }
 
@@ -54,7 +54,7 @@ pub fn deinit(self: *Self) void {
     self.diagnostic_log.deinit();
     self.diagnostic_arena.deinit();
     self.global_env.deinit();
-    self.func_names_arena.deinit();
+    self.mem_alloc_arena.deinit();
 }
 
 // Prints debug information about the interpreter's state.
@@ -219,7 +219,26 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
                         .ptr = intrinsics.arrayPush,
                     } };
                 }
+            } else if (target == .Tuple and member.kind == .integer_literal) {
+                if (member.kind.integer_literal > target.Tuple.len) {
+                    return self.reportError(
+                        "I013",
+                        "Tuple index out of bounds: {d}.",
+                        .{member.kind.integer_literal},
+                        error.IndexOutOfBounds,
+                        .{
+                            .labels = &.{.{
+                                .color = .{ .basic = .red },
+                                .span = node.span.asReportz(),
+                                .message = "Tuple index out of bounds.",
+                            }},
+                        },
+                    );
+                }
+
+                return target.Tuple[member.kind.integer_literal];
             }
+
             // temporary solution
             return self.reportError(
                 "I006",
@@ -286,6 +305,16 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             );
             return value;
         },
+        .tuple => |tuple| {
+            const count = tuple.expressions.len;
+            const elements = try self.mem_alloc_arena.allocator().alloc(runtime.RuntimeValue, count);
+
+            for (tuple.expressions, 0..) |expr_id, i| {
+                elements[i] = try self.evalNode(tree, expr_id, env);
+            }
+
+            return runtime.RuntimeValue{ .Tuple = elements };
+        },
         .variable => |variable| {
             // Evaluate the variable declaration.
             const value = try self.evalNode(tree, variable.expression, env);
@@ -308,7 +337,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             // Evaluate the function definition.
             const func_name = try self.getIdentifierName(tree, function_def.name);
 
-            const param_names = try self.func_names_arena.allocator().alloc([]const u8, function_def.parameters.len);
+            const param_names = try self.mem_alloc_arena.allocator().alloc([]const u8, function_def.parameters.len);
             for (function_def.parameters, 0..) |param, i| {
                 const param_node = tree.getNode(param).?;
                 const name = try self.getIdentifierName(tree, param_node.kind.parameter.name);
@@ -806,7 +835,7 @@ pub fn evalNativeFunctionDeclaration(self: *Self, tree: *const ast.Tree, node: a
         },
     );
 
-    const params = try self.func_names_arena.allocator().alloc(runtime.NativeFunctionValue.Arg, native_function_decl.parameters.len);
+    const params = try self.mem_alloc_arena.allocator().alloc(runtime.NativeFunctionValue.Arg, native_function_decl.parameters.len);
     for (native_function_decl.parameters, 0..) |param, i| {
         const param_node = tree.getNode(param).?;
         const name = try self.getIdentifierName(tree, param_node.kind.native_parameter.name);
@@ -819,7 +848,7 @@ pub fn evalNativeFunctionDeclaration(self: *Self, tree: *const ast.Tree, node: a
         .fn_ptr = fn_ptr,
     };
 
-    const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, native_function_decl.parameters.len });
+    const fn_key = try std.fmt.allocPrint(self.mem_alloc_arena.allocator(), "{s}/{}", .{ func_name, native_function_decl.parameters.len });
 
     try env.define(fn_key, .{ .NativeFunction = native_function_value }, false);
     return .{ .NativeFunction = native_function_value };
@@ -888,6 +917,7 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
                     .Function => .Function,
                     .NativeFunction => .Function,
                     .IntrinsicFunction => .Function,
+                    .Tuple => .Tuple,
                     .Void => .Unknown,
                 };
 

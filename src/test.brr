@@ -68,3 +68,7 @@ fn add(x, y) {
 }
 
 brr result = add(2, def-1);
+
+brr myTuple = (2+j, 3, "tuple", 4.5);
+
+ccc = myTuple.2;
