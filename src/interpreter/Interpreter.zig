@@ -4,6 +4,7 @@ const reportz = @import("reportz");
 
 const common = @import("../common.zig");
 const ast = @import("../parse/ast.zig");
+const intrinsics = @import("intrinsics.zig");
 const runtime = @import("runtime.zig");
 
 allocator: std.mem.Allocator,
@@ -206,9 +207,15 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
                 },
             );
             const target = try self.evalNode(tree, member_access.target, env);
+            env.this_context = target;
             if (target == .Array) {
                 if (std.mem.eql(u8, member.kind.identifier, "len")) {
                     return runtime.RuntimeValue{ .Integer = @intCast(target.Array.items.len) };
+                }
+                if (std.mem.eql(u8, member.kind.identifier, "push")) {
+                    return runtime.RuntimeValue{ .IntrinsicFunction = .{
+                        .ptr = intrinsics.arrayPush,
+                    } };
                 }
             }
             // temporary solution
@@ -254,6 +261,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             return try self.evalNode(tree, group.expression, env);
         },
         .expr_stmt => |expr_stmt| {
+            env.this_context = null; // Reset context of "this".
             // Evaluate the expression statement.
             return try self.evalNode(tree, expr_stmt, env);
         },
@@ -312,10 +320,8 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
                 .environment = env,
             };
 
-            const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, function_def.parameters.len });
-
             // Define the function in the environment.
-            try env.define(fn_key, .{ .Function = function_value }, false);
+            try env.define(func_name, .{ .Function = function_value }, true);
             return .{ .Function = function_value };
         },
         .native_function_decl => self.evalNativeFunctionDeclaration(tree, node, env),
@@ -819,57 +825,35 @@ pub fn evalNativeFunctionDeclaration(self: *Self, tree: *const ast.Tree, node: a
 
 pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const func_call = node.kind.function_call;
-    const target_node = tree.getNode(func_call.target).?;
-    const func_name = try self.getIdentifierName(tree, target_node.kind.variable_ref);
-
-    const fn_key = try std.fmt.allocPrint(self.func_names_arena.allocator(), "{s}/{}", .{ func_name, func_call.arguments.len });
-
-    const func_value = env.get(fn_key) orelse return self.reportError(
-        "I014",
-        "Function '{s}' not found in the current environment.",
-        .{fn_key},
-        error.RuntimeError,
-        .{
-            .labels = &.{.{
-                .color = .{ .basic = .red },
-                .span = node.span.asReportz(),
-                .message = "Function not found.",
-            }},
-        },
-    );
+    const func_value = try self.evalNode(tree, func_call.target, env);
 
     switch (func_value) {
-        .Function => {
+        .Function => |fun| {
             var func_env = try runtime.Environment.init(self.allocator, func_value.Function.environment, false);
             defer func_env.deinit();
 
-            if (func_call.arguments.len != func_value.Function.parameters.len) {
-                return self.reportError(
-                    "I014",
-                    "Function '{s}' expects {d} arguments, but got {d}.",
-                    .{ fn_key, func_value.Function.parameters.len, func_call.arguments.len },
-                    error.RuntimeError,
-                    .{
-                        .labels = &.{.{
-                            .color = .{ .basic = .red },
-                            .span = node.span.asReportz(),
-                            .message = "Argument count mismatch.",
-                        }},
-                    },
-                );
-            }
-
-            for (func_value.Function.parameters, 0..) |param_name, i| {
+            for (fun.parameters, 0..) |param_name, i| {
                 const arg = try self.evalNode(tree, func_call.arguments[i], env);
                 try func_env.define(param_name, arg, true);
             }
+            if (env.this_context) |this|
+                try func_env.define("this", this, false);
 
             _ = try self.evalNode(tree, func_value.Function.body_id, &func_env);
-
-            defer flow_control = .NOTHING;
-
-            return if (flow_control == .RETURN) flow_control.RETURN else runtime.RuntimeValue.Void;
         },
+        
+        .IntrinsicFunction => |fun| {
+            var args = try self.allocator.alloc(runtime.RuntimeValue, func_call.arguments.len);
+            defer self.allocator.free(args);
+
+            for (0..func_call.arguments.len) |i| {
+                const arg = try self.evalNode(tree, func_call.arguments[i], env);
+                args[i] = arg;
+            }
+
+            flow_control = .{ .RETURN = try fun.ptr(env.this_context, args, env) };
+        },
+
         .NativeFunction => |native_fn| {
             // Prepare the arguments for the native function.
             const args = try self.allocator.alloc(runtime.RuntimeValue, func_call.arguments.len);
@@ -924,22 +908,29 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
             // Call the native function.
             var result: runtime.RuntimeValue = runtime.RuntimeValue.Void;
             native_fn.fn_ptr(&args[0], args.len, &result);
-            return result;
+            flow_control = .{ .RETURN = result };
         },
+            
         else => return self.reportError(
-            "I013",
-            "Function '{s}' is not callable.",
-            .{fn_key},
+            "I014",
+            "Called value is not a function or intrinsic.",
+            .{},
             error.RuntimeError,
             .{
                 .labels = &.{.{
                     .color = .{ .basic = .red },
                     .span = node.span.asReportz(),
-                    .message = "Function is not callable.",
+                    .message = "This is not callable.",
                 }},
             },
         ),
     }
+
+    defer flow_control = .NOTHING;
+
+    const return_value = if (flow_control == .RETURN) flow_control.RETURN else runtime.RuntimeValue.Void;
+    env.this_context = return_value;
+    return return_value;
 }
 
 pub fn evalConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
@@ -1127,7 +1118,10 @@ fn compare(self: *Self, t1: runtime.RuntimeValue, t2: runtime.RuntimeValue) Self
 pub fn evalArrayLiteral(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const array_literal = node.kind.array_literal;
 
-    var return_array = std.ArrayList(runtime.RuntimeValue).init(env.arena_allocator.allocator());
+    const alloc = env.arena_allocator.allocator();
+    var return_array = try alloc.create(std.ArrayList(runtime.RuntimeValue));
+    errdefer alloc.destroy(return_array);
+    return_array.* = .init(env.arena_allocator.allocator());
     errdefer return_array.deinit();
 
     for (array_literal.elements) |element| {
@@ -1194,7 +1188,9 @@ pub fn evalIndexedAccess(self: *Self, tree: *const ast.Tree, node: ast.Node, env
 
     const usize_index: usize = @intCast(index.Integer);
 
-    return target.Array.items[usize_index];
+    const value = target.Array.items[usize_index];
+    env.this_context = value;
+    return value;
 }
 
 const AbiParts = struct {
