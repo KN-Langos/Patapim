@@ -841,7 +841,7 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
 
             _ = try self.evalNode(tree, func_value.Function.body_id, &func_env);
         },
-        
+
         .IntrinsicFunction => |fun| {
             var args = try self.allocator.alloc(runtime.RuntimeValue, func_call.arguments.len);
             defer self.allocator.free(args);
@@ -862,8 +862,8 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
             if (func_call.arguments.len != native_fn.parameters.len) {
                 return self.reportError(
                     "I014",
-                    "Function '{s}' expects {d} arguments, but got {d}.",
-                    .{ fn_key, native_fn.parameters.len, func_call.arguments.len },
+                    "Native function expects {d} arguments, but got {d}.",
+                    .{ native_fn.parameters.len, func_call.arguments.len }, // TODO: Provide nice name.
                     error.RuntimeError,
                     .{
                         .labels = &.{.{
@@ -885,14 +885,15 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
                     .Array => .Array,
                     .Function => .Function,
                     .NativeFunction => .Function,
+                    .IntrinsicFunction => .Function,
                     .Void => .Unknown,
                 };
 
                 if (native_fn.parameters[i].type != .Unknown and native_fn.parameters[i].type != runtime_type) {
                     return self.reportError(
                         "I015",
-                        "Function '{s}' parameter {d} expects type {s}, but got {s}.",
-                        .{ fn_key, i, @tagName(native_fn.parameters[i].type), @tagName(runtime_type) },
+                        "Native function parameter {d} expects type {s}, but got {s}.",
+                        .{ i, @tagName(native_fn.parameters[i].type), @tagName(runtime_type) },
                         error.RuntimeError,
                         .{
                             .labels = &.{.{
@@ -910,7 +911,7 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
             native_fn.fn_ptr(&args[0], args.len, &result);
             flow_control = .{ .RETURN = result };
         },
-            
+
         else => return self.reportError(
             "I014",
             "Called value is not a function or intrinsic.",
