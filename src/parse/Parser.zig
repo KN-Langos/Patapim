@@ -506,16 +506,25 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
         try self.pushSpan();
         defer _ = self.popSpan();
 
-        // Types are optional.
-        var type_node: ?common.NodeId = null;
-        if (try self.maybe(.COLON) != null)
-            type_node = try self.expectIdentifier();
+        // Types are optional. Assumed to be `unknown` if not provided.
+        var type_value: ast.Type = .Unknown;
+        if (try self.maybe(.COLON) != null) {
+            type_value = switch ((try self.advance()).type) {
+                .KW_INT => .Int,
+                .KW_FLOAT => .Float,
+                .KW_BOOL => .Bool,
+                .KW_STRING => .String,
+                .KW_FUNCTION_TYPE => .Function,
+                .KW_ARRAY_TYPE => .Array,
+                else => return error.UnexpectedToken,
+            };
+        }
 
         const param = try self.tree.addNode(.{
             .span = self.peekSpan(),
             .kind = .{ .native_parameter = .{
                 .name = param_name,
-                .type = type_node,
+                .type = type_value,
             } },
         });
 
@@ -1333,7 +1342,7 @@ test "Parse constant declaration statement" {
 }
 
 test "Parse native function declaration statement" {
-    const source = "native \"C\" fn lorem(hello: i32, world);";
+    const source = "native \"C\" fn lorem(hello: int, world);";
     var lexer: Lexer = .{ .source = source };
     var parser = Self.init(std.testing.allocator, &lexer);
     defer parser.deinit(true);
@@ -1345,7 +1354,7 @@ test "Parse native function declaration statement" {
         .kind = .{ .native_function_decl = .{
             .abi = 0,
             .name = 1,
-            .parameters = &.{ 4, 6 },
+            .parameters = &.{ 3, 5 },
         } },
     }, fn_node);
 }
