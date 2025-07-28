@@ -282,14 +282,6 @@ pub fn next(self: *Self, allocator: std.mem.Allocator) Self.Error!Token {
         result_token.lexeme,
         result_token.literal,
     });
-
-    std.debug.print("Generated token '{any}'@{d}:{d} - \"{s}\" ({any})\n", .{
-        token_type,
-        result_token.span.start,
-        result_token.span.end,
-        result_token.lexeme,
-        result_token.literal,
-    });
     return result_token;
 }
 
