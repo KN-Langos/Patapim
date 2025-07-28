@@ -83,6 +83,7 @@ pub const KEYWORD_MAP: std.StaticStringMap(TokenType) = .initComptime(.{
     .{ "string", .KW_STRING },
     .{ "function", .KW_FUNCTION_TYPE },
     .{ "array", .KW_ARRAY_TYPE },
+    .{ "tuple", .KW_TUPLE_TYPE },
 });
 
 pub const TokenType = enum {
@@ -179,6 +180,7 @@ pub const TokenType = enum {
     KW_STRING, // 'string'
     KW_FUNCTION_TYPE, // 'function'
     KW_ARRAY_TYPE, // 'array'
+    KW_TUPLE_TYPE, // 'tuple'
 
     // Special tokens:
     INTEGER_LITERAL,
@@ -211,18 +213,6 @@ fn reportError(self: *Self, code: []const u8, message: []const u8, error_type: S
     };
 
     return error_type;
-}
-
-// Initialize the lexer with source code and its ID.
-pub fn isAtEndOrOnlyWhitespaceRemaining(self: *Self) bool {
-    var i = self.current;
-    while (i < self.source.len) {
-        switch (self.source[i]) {
-            ' ', '\t', '\n', '\r' => i += 1,
-            else => return false,
-        }
-    }
-    return true;
 }
 
 // Check whether lexer has reached the end of source being scanned.
@@ -286,6 +276,14 @@ pub fn next(self: *Self, allocator: std.mem.Allocator) Self.Error!Token {
     };
     self.start = self.current;
     LOG.debug("Generated token '{any}'@{d}:{d} - \"{s}\" ({any})", .{
+        token_type,
+        result_token.span.start,
+        result_token.span.end,
+        result_token.lexeme,
+        result_token.literal,
+    });
+
+    std.debug.print("Generated token '{any}'@{d}:{d} - \"{s}\" ({any})\n", .{
         token_type,
         result_token.span.start,
         result_token.span.end,

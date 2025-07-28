@@ -199,7 +199,7 @@ pub fn parseWholeSource(self: *Self) !usize {
     try self.pushSpanOnNextToken();
     defer _ = self.popSpan(); // We do not need to keep this span on stack after error.
 
-    while (!self.lexer.isAtEndOrOnlyWhitespaceRemaining()) {
+    while ((try self.peek()).type != .EOF) {
         const stmt = try self.parseAnyStatement();
         try module_statements.append(stmt);
     }
@@ -516,6 +516,7 @@ pub fn parseMaybeNativeFunctionDeclStatement(self: *Self) !?usize {
                 .KW_STRING => .String,
                 .KW_FUNCTION_TYPE => .Function,
                 .KW_ARRAY_TYPE => .Array,
+                .KW_TUPLE_TYPE => .Tuple,
                 else => return error.UnexpectedToken,
             };
         }
