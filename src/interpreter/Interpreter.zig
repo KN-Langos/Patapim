@@ -1060,6 +1060,7 @@ fn isTruthy(value: runtime.RuntimeValue) bool {
         .Integer => |i| i != 0,
         .Float => |f| f != 0.0,
         .String => |s| s.len != 0,
+        .Array => |a| a.items.len != 0,
         else => false, // Other types are considered falsey.
     };
 }

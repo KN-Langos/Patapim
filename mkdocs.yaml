@@ -1,0 +1,17 @@
+site_name: Patapim Language Documentation
+theme:
+  name: material
+nav:
+  - Overview: index.md
+  - Syntax:
+      - Arrays: syntax/arrays.md
+      - Closures: syntax/closures.md
+      - Comments: syntax/comments.md
+      - Conditionals: syntax/conditionals.md
+      - Functions: syntax/functions.md
+      - Imports: syntax/imports.md
+      - Loops: syntax/loops.md
+      - Native Functions: syntax/native-functions.md
+      - Operators: syntax/operators.md
+      - Tuples: syntax/tuples.md
+      - Variables and Constants: syntax/variables.md
