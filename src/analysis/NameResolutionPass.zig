@@ -62,6 +62,28 @@ pub fn reportError(
     return error_type;
 }
 
+pub fn visitStructDecl(self: *Self, tree: *const ast.Tree, span: common.Span, def: ast.StructDecl, visitee: anytype) !void {
+    _ = visitee;
+    _ = span;
+
+    // Enter struct scope from struct.
+    self.metadata.enterScope(
+        self.metadata.references[self.current_nodeid],
+    );
+
+    var scope = self.metadata.currentScope();
+
+    for (def.fields) |field| {
+        const var_name = tree.getNodeUnsafe(field).kind.identifier;
+        try scope.known_names.put(var_name, self.current_nodeid);
+    }
+
+    for (def.decls) |decl|
+        try self.accept(tree, decl);
+
+    _ = self.metadata.popScope();
+}
+
 pub fn visitFunctionDef(self: *Self, tree: *const ast.Tree, span: common.Span, def: ast.FunctionDef, visitee: anytype) !void {
     _ = visitee;
     _ = span;

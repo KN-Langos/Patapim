@@ -379,6 +379,9 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             return flow_control.RETURN;
         },
         .inline_conditional => return try self.evalInlineConditional(tree, node, env),
+        .struct_decl => {
+            return runtime.RuntimeValue.Void;
+        },
         else => {
             LOG.warn("Unsupported node type: {s}", .{@tagName(node.kind)});
 
