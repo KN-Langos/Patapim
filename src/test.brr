@@ -72,3 +72,11 @@ brr result = add(2, def-1);
 brr myTuple = (2+j, 3, "tuple", 4.5);
 
 ccc = myTuple.2;
+
+struct MyStruct {
+    num1, num2, num3,
+
+    fn sum() {
+        return num1 + num2 + num3;
+    }
+}
