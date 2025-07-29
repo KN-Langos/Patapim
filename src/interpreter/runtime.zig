@@ -7,6 +7,8 @@ pub const Error = error{
     UndeclaredVariable,
     VariableAlreadyDeclared,
     CannotModifyImmutableVariable,
+    UnknownType,
+    TypeAlreadyDeclared,
 };
 
 // Runtime values used during the execution of the program.
@@ -109,6 +111,14 @@ pub const VariableBinding = struct {
     is_mutable: bool, // Indicates if the variable can be modified.
 };
 
+// StructType represents a structure type in the runtime.
+pub const StructType = struct {
+    name: []const u8, // The name of the structure.
+    fields: [][]const u8, // The fields of the structure, represented as a list of field names.
+    methods: std.StringHashMap(FunctionValue), // The methods of the structure, mapped by method names.
+    environment: *Environment, // The environment in which the structure was defined.
+};
+
 // Environment represents a runtime environment that holds variable bindings.
 // It is a stack of environments where each environment can have its own set of variable bindings.
 // This allows for nested scopes and variable shadowing.
@@ -122,6 +132,7 @@ pub const VariableBinding = struct {
 pub const Environment = struct {
     parent: ?*Environment,
     values: std.StringHashMap(VariableBinding),
+    types: std.StringHashMap(StructType), // This is used to store struct types.
     is_top_level: bool = false, // Indicates if this is the top-level environment.
     arena_allocator: std.heap.ArenaAllocator,
     this_context: ?RuntimeValue = null,
@@ -133,6 +144,7 @@ pub const Environment = struct {
         return Environment{
             .parent = parent,
             .values = std.StringHashMap(VariableBinding).init(allocator),
+            .types = std.StringHashMap(StructType).init(allocator),
             .is_top_level = is_top_level,
             .arena_allocator = std.heap.ArenaAllocator.init(allocator),
         };
@@ -143,6 +155,7 @@ pub const Environment = struct {
     // This should be called when the environment is no longer needed.
     pub fn deinit(self: *Environment) void {
         self.values.deinit();
+        self.types.deinit();
         self.arena_allocator.deinit();
     }
 
@@ -158,7 +171,8 @@ pub const Environment = struct {
 
     // Sets the value for the given key in the environment.
     // It updates the value in the current environment.
-    // If the key does not exist, it adds a new entry.
+    // If the key does not exist, it checks the parent environment recursively.
+    // If the key is not found in any environment, it returns an error.
     pub fn set(self: *Environment, key: []const u8, value: RuntimeValue) !void {
         if (self.values.getPtr(key)) |binding| {
             if (!binding.is_mutable) {
@@ -186,5 +200,25 @@ pub const Environment = struct {
             .value = value,
             .is_mutable = is_mutable,
         });
+    }
+
+    // Declares a new type in the environment.
+    // It adds a new struct type to the environment's types map.
+    pub fn declareType(self: *Environment, name: []const u8, typeValue: StructType) !void {
+        if (self.types.contains(name)) {
+            return error.TypeAlreadyDeclared; // Type already exists, cannot redefine
+        }
+
+        try self.types.put(name, typeValue);
+    }
+
+    // Gets a type by its name from the environment.
+    // It first checks the current environment for the type.
+    // If the type is not found, it checks the parent environment recursively.
+    // If the type is not found in any environment, it returns an error.
+    pub fn getType(self: *const Environment, name: []const u8) ?StructType {
+        if (self.types.get(name)) |typeValue| return typeValue;
+        if (self.parent) |parent_env| return parent_env.getType(name);
+        return error.UnknownType;
     }
 };
