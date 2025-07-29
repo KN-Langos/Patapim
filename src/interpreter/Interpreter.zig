@@ -379,7 +379,10 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             return flow_control.RETURN;
         },
         .inline_conditional => return try self.evalInlineConditional(tree, node, env),
-        .struct_decl => {
+        .struct_decl => return try self.evalStructDeclaration(tree, node, env),
+        .struct_literal => |struct_literal| {
+            _ = struct_literal;
+
             return runtime.RuntimeValue.Void;
         },
         else => {
@@ -806,6 +809,59 @@ pub fn evalUnaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *r
             },
         ),
     };
+}
+
+// Evaluates a struct declaration.
+pub fn evalStructDeclaration(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const struct_decl = node.kind.struct_decl;
+
+    const struct_name = try self.getIdentifierName(tree, struct_decl.name);
+
+    // Structure that stores fields names init
+    const field_names = try self.mem_alloc_arena.allocator().alloc([]const u8, struct_decl.fields.len);
+
+    for (struct_decl.fields, 0..) |field_id, i| {
+        const field_name = try self.getIdentifierName(tree, field_id);
+        field_names[i] = field_name;
+    }
+
+    var functions = std.StringHashMap(runtime.FunctionValue).init(self.mem_alloc_arena.allocator());
+    const struct_env = try self.mem_alloc_arena.allocator().create(runtime.Environment);
+    struct_env.* = try runtime.Environment.init(self.allocator, env, false);
+
+    for (struct_decl.decls) |decl_id| {
+        const decl_node = ((tree.getNode(decl_id)).?).kind.function_def;
+
+        const func_name = try self.getIdentifierName(tree, decl_node.name);
+
+        const param_names = try self.mem_alloc_arena.allocator().alloc([]const u8, decl_node.parameters.len);
+        for (decl_node.parameters, 0..) |param, i| {
+            const param_node = tree.getNode(param).?;
+            const name = try self.getIdentifierName(tree, param_node.kind.parameter.name);
+            param_names[i] = name;
+        }
+
+        // Create a new function value.
+        const function_value = runtime.FunctionValue{
+            .parameters = param_names,
+            .body_id = decl_node.body,
+            .environment = struct_env,
+        };
+
+        try functions.put(func_name, function_value);
+    }
+
+    // Create a new struct value.
+    const struct_value = runtime.StructType{
+        .name = struct_name,
+        .fields = field_names,
+        .methods = functions,
+        .environment = struct_env,
+    };
+
+    try env.declareType(struct_name, struct_value);
+
+    return runtime.RuntimeValue.Void;
 }
 
 // Evaluates a native function declaration.
