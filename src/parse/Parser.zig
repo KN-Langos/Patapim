@@ -896,6 +896,21 @@ pub fn parseAtom(self: *Self) !usize {
         .KW_IF => {
             return try self.parseInlineConditional();
         },
+        .KW_THIS => {
+            try self.pushSpan();
+            defer _ = self.popSpan();
+
+            const this = try self.tree.addNode(.{
+                .span = token.span,
+                .kind = .this,
+            });
+
+            const next = try self.peek();
+            if (next.type == .DOT)
+                return try self.parsePostfix(this);
+
+            return this;
+        },
         else => return self.reportError(
             "P003",
             "Expected an expression atom.",

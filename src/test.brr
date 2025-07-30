@@ -77,7 +77,7 @@ struct MyStruct {
     num1, num2, num3,
 
     fn sum() {
-        return num1 + num2 + num3;
+        return this.num1 + this.num2 + this.num3;
     }
 }
 

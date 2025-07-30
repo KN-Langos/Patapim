@@ -381,9 +381,48 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .inline_conditional => return try self.evalInlineConditional(tree, node, env),
         .struct_decl => return try self.evalStructDeclaration(tree, node, env),
         .struct_literal => |struct_literal| {
-            _ = struct_literal;
+            const type_name_node = tree.getNode(struct_literal.target.?).?;
+            const type_name = try self.getIdentifierName(tree, type_name_node.kind.variable_ref);
 
-            return runtime.RuntimeValue.Void;
+            std.debug.print("Creating struct of type {s}\n", .{type_name});
+
+            var fields = std.StringHashMap(runtime.RuntimeValue).init(self.mem_alloc_arena.allocator());
+
+            const struct_type = env.getType(type_name).?;
+            for (struct_literal.fields) |field_id| {
+                const field_node = tree.getNode(field_id).?;
+                const field_name = try self.getIdentifierName(tree, field_node.kind.field_def.name);
+
+                if (!struct_type.hasField(field_name)) {
+                    return self.reportError(
+                        "I014",
+                        "Field '{s}' does not exist in struct type '{s}'.",
+                        .{ field_name, type_name },
+                        error.RuntimeError,
+                        .{
+                            .labels = &.{.{
+                                .color = .{ .basic = .red },
+                                .span = field_node.span.asReportz(),
+                                .message = "Field does not exist in struct type.",
+                            }},
+                        },
+                    );
+                }
+
+                const field_value = try self.evalNode(tree, field_node.kind.field_def.value, env);
+
+                // Add the field to the struct value.
+                try fields.put(field_name, field_value);
+            }
+
+            const struct_value = runtime.RuntimeValue{
+                .Struct = runtime.StructValue{
+                    .type_name = type_name,
+                    .fields = fields,
+                },
+            };
+
+            return struct_value;
         },
         else => {
             LOG.warn("Unsupported node type: {s}", .{@tagName(node.kind)});
@@ -977,6 +1016,7 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
                     .NativeFunction => .Function,
                     .IntrinsicFunction => .Function,
                     .Tuple => .Tuple,
+                    .Struct => .Struct,
                     .Void => .Unknown,
                 };
 

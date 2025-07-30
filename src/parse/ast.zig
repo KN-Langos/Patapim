@@ -64,6 +64,7 @@ pub const NodeKind = union(enum) {
     struct_literal: StructLiteral,
     variable_ref: NodeId,
     tuple: Tuple,
+    this: void,
 };
 
 // ---< AST Nodes begin >---
@@ -314,5 +315,6 @@ pub const Type = enum {
     Function,
     Array,
     Tuple,
+    Struct,
     Unknown,
 };
