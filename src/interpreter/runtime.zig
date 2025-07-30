@@ -25,6 +25,7 @@ pub const RuntimeValue = union(enum) {
     Function: FunctionValue,
     NativeFunction: NativeFunctionValue,
     IntrinsicFunction: IntrinsicFunctionValue,
+    Struct: StructValue,
 
     // Converts the RuntimeValue to a string representation.
     // This is useful for debugging or displaying values.
@@ -74,6 +75,34 @@ pub const RuntimeValue = union(enum) {
             .Function => std.fmt.allocPrint(allocator, "Function with body id {}", .{self.Function.body_id}),
             .NativeFunction => std.fmt.allocPrint(allocator, "Native function: {s} from library.", .{self.NativeFunction.name}),
             .IntrinsicFunction => |ptr| std.fmt.allocPrint(allocator, "Intrinsic function at {*}", .{ptr.ptr}),
+            .Struct => |struct_value| {
+                var string = std.ArrayList(u8).init(allocator);
+                defer string.deinit();
+
+                try string.writer().print("{s} {{", .{struct_value.type_name orelse "anonymous"});
+
+                var keys = struct_value.fields.keyIterator();
+                var values = struct_value.fields.valueIterator();
+                var first = true;
+
+                while (keys.next()) |key| {
+                    const value = values.next().?;
+
+                    if (!first) {
+                        try string.appendSlice(", ");
+                    }
+                    first = false;
+
+                    try string.writer().print("{s}: ", .{key.*});
+
+                    const value_string = try value.*.toString(allocator);
+                    defer allocator.free(value_string);
+                    try string.appendSlice(value_string);
+                }
+
+                try string.append('}');
+                return string.toOwnedSlice();
+            },
         };
     }
 };
@@ -102,6 +131,11 @@ pub const IntrinsicFunctionValue = struct {
     ptr: *const fn (?RuntimeValue, []const RuntimeValue, *Environment) Interpreter.Error!RuntimeValue,
 };
 
+pub const StructValue = struct {
+    type_name: ?[]const u8, // The name of the structure type.
+    fields: std.StringHashMap(RuntimeValue), // The fields of the structure, mapped by field names.
+};
+
 // VariableBinding represents a binding of a variable to a runtime value.
 // It holds the value of the variable and a flag indicating if the variable is mutable.
 // This is used in the environment to manage variable states during execution.
@@ -117,6 +151,15 @@ pub const StructType = struct {
     fields: [][]const u8, // The fields of the structure, represented as a list of field names.
     methods: std.StringHashMap(FunctionValue), // The methods of the structure, mapped by method names.
     environment: *Environment, // The environment in which the structure was defined.
+
+    pub fn hasField(self: *const StructType, field_name: []const u8) bool {
+        for (self.fields) |field| {
+            if (std.mem.eql(u8, field, field_name)) {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 // Environment represents a runtime environment that holds variable bindings.
@@ -219,6 +262,6 @@ pub const Environment = struct {
     pub fn getType(self: *const Environment, name: []const u8) ?StructType {
         if (self.types.get(name)) |typeValue| return typeValue;
         if (self.parent) |parent_env| return parent_env.getType(name);
-        return error.UnknownType;
+        return null;
     }
 };
