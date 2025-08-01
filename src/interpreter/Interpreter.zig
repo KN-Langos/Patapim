@@ -208,6 +208,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
                     }},
                 },
             );
+
             const target = try self.evalNode(tree, member_access.target, env);
             env.this_context = target;
             if (target == .Array) {
@@ -416,8 +417,6 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
             const type_name_node = tree.getNode(struct_literal.target.?).?;
             const type_name = try self.getIdentifierName(tree, type_name_node.kind.variable_ref);
 
-            std.debug.print("Creating struct of type {s}\n", .{type_name});
-
             var fields = std.StringHashMap(runtime.RuntimeValue).init(self.mem_alloc_arena.allocator());
 
             const struct_type = env.getType(type_name).?;
@@ -537,6 +536,61 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
 
             array.Array.items[array_index] = value;
             // break early to skip changes in environment
+            return value;
+        },
+        .member_access => {
+            var target = try self.evalNode(tree, name_node.kind.member_access.target, env);
+            const target_var = tree.getNode(name_node.kind.member_access.target).?.kind.variable_ref;
+            const target_name = try self.getIdentifierName(tree, target_var);
+
+            if (env.values.getPtr(target_name)) |binding| {
+                if (!binding.is_mutable) {
+                    return self.reportError(
+                        "I017",
+                        "Cannot assign to immutable variable '{s}'.",
+                        .{target_name},
+                        error.CannotModifyImmutableVariable,
+                        .{
+                            .labels = &.{.{
+                                .color = .{ .basic = .red },
+                                .span = node.span.asReportz(),
+                                .message = "Variable is immutable.",
+                            }},
+                        },
+                    );
+                }
+            }
+
+            const member = tree.getNode(name_node.kind.member_access.member) orelse return self.reportError(
+                "I001",
+                "Node with ID {} does not exist.",
+                .{name_node},
+                error.InvalidNodeId,
+                .{
+                    .labels = &.{.{
+                        .color = .{ .basic = .red },
+                        .span = node.span.asReportz(),
+                        .message = "Node ID out of bounds.",
+                    }},
+                },
+            );
+
+            if (!target.Struct.fields.contains(member.kind.identifier)) {
+                return self.reportError(
+                    "I014",
+                    "Field '{s}' does not exist in struct type '{s}'.",
+                    .{ member.kind.identifier, target.Struct.type_name.? },
+                    error.RuntimeError,
+                    .{
+                        .labels = &.{.{
+                            .color = .{ .basic = .red },
+                            .span = node.span.asReportz(),
+                            .message = "Field does not exist in struct type.",
+                        }},
+                    },
+                );
+            }
+            try target.Struct.fields.put(member.kind.identifier, value);
             return value;
         },
         else => return error.UnsupportedNodeType,
