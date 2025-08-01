@@ -237,6 +237,38 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
                 }
 
                 return target.Tuple[member.kind.integer_literal];
+            } else if (target == .Struct) {
+                const field = target.Struct.fields.get(member.kind.identifier);
+                if (field != null) return field.?;
+
+                const struct_type = env.getType(target.Struct.type_name.?);
+
+                if (struct_type != null) {
+                    const method = struct_type.?.methods.get(member.kind.identifier);
+                    if (method != null) {
+                        return runtime.RuntimeValue{
+                            .Function = runtime.FunctionValue{
+                                .parameters = method.?.parameters,
+                                .body_id = method.?.body_id,
+                                .environment = method.?.environment,
+                            },
+                        };
+                    }
+                }
+
+                return self.reportError(
+                    "I016",
+                    "Field or method '{s}' does not exist in struct type '{s}'.",
+                    .{ member.kind.identifier, target.Struct.type_name.? },
+                    error.RuntimeError,
+                    .{
+                        .labels = &.{.{
+                            .color = .{ .basic = .red },
+                            .span = node.span.asReportz(),
+                            .message = "Field or method does not exist in struct type.",
+                        }},
+                    },
+                );
             }
 
             // temporary solution
@@ -1060,9 +1092,13 @@ pub fn evalFunctionCall(self: *Self, tree: *const ast.Tree, node: ast.Node, env:
 
     defer flow_control = .NOTHING;
 
-    const return_value = if (flow_control == .RETURN) flow_control.RETURN else runtime.RuntimeValue.Void;
-    env.this_context = return_value;
-    return return_value;
+    if (flow_control == .RETURN) {
+        env.this_context = flow_control.RETURN;
+        return flow_control.RETURN;
+    } else {
+        env.this_context = runtime.RuntimeValue.Void;
+        return runtime.RuntimeValue.Void;
+    }
 }
 
 pub fn evalConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {

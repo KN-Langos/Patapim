@@ -135,6 +135,8 @@ pub fn visitVariableRef(self: *Self, tree: *const ast.Tree, span: common.Span, i
     _ = visitee;
 
     const var_name = tree.getNodeUnsafe(ident).kind.identifier;
+
+    if (std.mem.eql(u8, var_name, "this")) return;
     const found_ref = self.metadata.findName(var_name);
     if (found_ref) |found| {
         self.metadata.references[self.current_nodeid] = found;
