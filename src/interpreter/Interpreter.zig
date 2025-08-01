@@ -620,7 +620,12 @@ pub fn evalBinaryExpr(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                     .Float => |rf| break :blk .{ .Float = lf + rf },
                     else => return error.InvalidTypeForBinaryOperation,
                 },
-                // TODO: Implement string concatenation.
+                .String => |ls| switch (right_value) {
+                    .String => |rs| break :blk .{ .String = try std.mem.concat(self.mem_alloc_arena.allocator(), u8, &[_][]const u8{ ls, rs }) },
+                    .Integer => |ri| break :blk .{ .String = try std.fmt.allocPrint(self.mem_alloc_arena.allocator(), "{s}{d}", .{ ls, ri }) },
+                    .Float => |rf| break :blk .{ .String = try std.fmt.allocPrint(self.mem_alloc_arena.allocator(), "{s}{d}", .{ ls, rf }) },
+                    else => return error.InvalidTypeForBinaryOperation,
+                },
                 else => return error.InvalidTypeForBinaryOperation,
             }
         },
