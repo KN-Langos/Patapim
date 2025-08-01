@@ -83,6 +83,8 @@ struct MyStruct {
 
 brr upo = MyStruct { num1: 1, num2: 2, num3: 3 };
 
-brr ppas = upo.sum();
+brr ups = upo.num1; //1
 
-brr ups = upo.num1;
+upo.num1 = 10;
+
+brr ppas = upo.sum(); //15
