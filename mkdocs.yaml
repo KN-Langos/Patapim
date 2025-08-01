@@ -13,5 +13,6 @@ nav:
       - Loops: syntax/loops.md
       - Native Functions: syntax/native-functions.md
       - Operators: syntax/operators.md
+      - Structures: syntax/structures.md
       - Tuples: syntax/tuples.md
       - Variables and Constants: syntax/variables.md
