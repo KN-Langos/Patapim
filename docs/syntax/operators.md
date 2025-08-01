@@ -60,3 +60,17 @@ Patapim provides a comprehensive set of operators for performing operations on v
 ()  Function call      (myFunction())
 ..  Range              (for i in 1..5)
 ```
+
+### 7. String Operators
+
+String concatenation ("hello" + "world" → "helloworld")
+
+**Behavior:**
+
+- Concatenates two strings when both operands are strings
+- Converts non-string operands (numbers) to strings automatically:
+  ```
+  "ID: " + 42;      // "ID: 42"
+  "Price: " + 92.12 // "Price: 92.12"
+  ```
+- Returns runtime error for incompatible types (e.g., array + string)
