@@ -1,6 +1,6 @@
 # Tuples
 
-Tuples are fixed-size, ordered collections that can contain elements of different types. They provide a lightweight way to group related values without creating a formal structure.
+Tuples are fixed-size, immutable, ordered collections that can contain elements of different types. They provide a lightweight way to group related values without creating a formal structure.
 
 ## Tuple Creation
 ```
