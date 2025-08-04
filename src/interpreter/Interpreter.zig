@@ -86,6 +86,7 @@ pub const Error = error{
     IndexOutOfBounds,
     IndexNotAnInteger,
     NativeFunctionLoadError,
+    InvalidTypeForRange,
 } || runtime.Error || std.DynLib.Error || std.mem.Allocator.Error;
 
 // Reports an error with the given code, message format, and arguments.
@@ -146,19 +147,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         return .Void;
     }
 
-    const node = tree.getNode(node_id) orelse return self.reportError(
-        "I001",
-        "Node with ID {} does not exist.",
-        .{node_id},
-        error.InvalidNodeId,
-        .{
-            .labels = &.{.{
-                .color = .{ .basic = .red },
-                .span = (common.Span{ .start = node_id, .end = node_id + 1 }).asReportz(),
-                .message = "Node ID out of bounds.",
-            }},
-        },
-    );
+    const node = try self.getNode(tree, node_id, common.Span{ .start = node_id, .end = node_id + 1 });
 
     return switch (node.kind) {
         .module => |module| {
@@ -194,20 +183,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .indexed_access => evalIndexedAccess(self, tree, node, env),
         .member_access => {
             const member_access = node.kind.member_access;
-            // this was stolen from another function, it could need some changes TODO: extract to outer function
-            const member = tree.getNode(member_access.member) orelse return self.reportError(
-                "I001",
-                "Node with ID {} does not exist.",
-                .{node_id},
-                error.InvalidNodeId,
-                .{
-                    .labels = &.{.{
-                        .color = .{ .basic = .red },
-                        .span = (common.Span{ .start = node_id, .end = node_id + 1 }).asReportz(),
-                        .message = "Node ID out of bounds.",
-                    }},
-                },
-            );
+            const member = try self.getNode(tree, member_access.member, common.Span{ .start = node_id, .end = node_id + 1 });
 
             const target = try self.evalNode(tree, member_access.target, env);
             env.this_context = target;
@@ -393,6 +369,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .conditional => return try self.evalConditional(tree, node, env),
         .loop => return try self.evalLoop(tree, node, env),
         .while_loop => return try self.evalWhile(tree, node, env),
+        .for_loop => return try self.evalForLoop(tree, node, env),
         .break_stmt => {
             flow_control = .BREAK;
             return runtime.RuntimeValue.Void;
@@ -561,19 +538,7 @@ pub fn evalAssignment(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *
                 }
             }
 
-            const member = tree.getNode(name_node.kind.member_access.member) orelse return self.reportError(
-                "I001",
-                "Node with ID {} does not exist.",
-                .{name_node},
-                error.InvalidNodeId,
-                .{
-                    .labels = &.{.{
-                        .color = .{ .basic = .red },
-                        .span = node.span.asReportz(),
-                        .message = "Node ID out of bounds.",
-                    }},
-                },
-            );
+            const member = try self.getNode(tree, name_node.kind.member_access.member, node.span);
 
             if (!target.Struct.fields.contains(member.kind.identifier)) {
                 return self.reportError(
@@ -1228,6 +1193,102 @@ pub fn evalWhile(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runti
     return return_value;
 }
 
+pub fn evalForLoop(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const for_loop = node.kind.for_loop;
+    const for_loop_variable = try self.getIdentifierName(tree, for_loop.binding);
+
+    const iterable = try self.getNode(tree, for_loop.iterable, node.span);
+
+    var loop_env = try runtime.Environment.init(self.allocator, env, false);
+    defer loop_env.deinit();
+
+    try loop_env.define(for_loop_variable, .{ .Integer = 0 }, true);
+    var return_value: runtime.RuntimeValue = runtime.RuntimeValue.Void;
+
+    if (iterable.kind == .binary_operator and iterable.kind.binary_operator.operator == .RANGE) {
+        const start_value = try self.evalNode(tree, iterable.kind.binary_operator.left, env);
+        const end_value = try self.evalNode(tree, iterable.kind.binary_operator.right, env);
+
+        if (start_value != .Integer and end_value != .Integer) {
+            return self.reportError(
+                "I003",
+                "Range start and end values must be an integer, found: {s} and {s}",
+                .{ @tagName(start_value), @tagName(end_value) },
+                error.InvalidTypeForRange,
+                .{
+                    .labels = &.{.{
+                        .color = .{ .basic = .red },
+                        .span = iterable.span.asReportz(),
+                        .message = "Invalid range start or end value type.",
+                    }},
+                },
+            );
+        }
+
+        var i = start_value.Integer;
+        const end = end_value.Integer;
+        try loop_env.set(for_loop_variable, .{ .Integer = i });
+
+        while (i < end) {
+            if (checkBreak())
+                break;
+
+            try loop_env.set(for_loop_variable, .{ .Integer = i });
+
+            // Evaluate the loop body.
+            return_value = try self.evalNode(tree, for_loop.body, &loop_env);
+
+            // Increment the loop variable.
+            i += 1;
+        }
+
+        return return_value;
+    }
+
+    // If the iterable is not a range, it must be an array or a string.
+    const iterable_value = try self.evalNode(tree, for_loop.iterable, env);
+
+    switch (iterable_value) {
+        .Array => |array| {
+            const items = array.items;
+            for (items) |item| {
+                if (checkBreak())
+                    break;
+
+                try loop_env.set(for_loop_variable, item);
+                return_value = try self.evalNode(tree, for_loop.body, &loop_env);
+            }
+        },
+        .String => |string| {
+            var buf: [1]u8 = undefined;
+            for (string) |char| {
+                if (checkBreak())
+                    break;
+
+                buf[0] = char;
+                const char_str: []const u8 = &buf;
+                try loop_env.set(for_loop_variable, .{ .String = char_str });
+                return_value = try self.evalNode(tree, for_loop.body, &loop_env);
+            }
+        },
+        else => return self.reportError(
+            "I006",
+            "For loop iterable must be an array or a string, found: {s}",
+            .{@tagName(iterable_value)},
+            error.RuntimeError,
+            .{
+                .labels = &.{.{
+                    .color = .{ .basic = .red },
+                    .span = iterable.span.asReportz(),
+                    .message = "Invalid iterable type.",
+                }},
+            },
+        ),
+    }
+
+    return return_value;
+}
+
 pub fn evalInlineConditional(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
     const inline_conditional = node.kind.inline_conditional;
 
@@ -1450,4 +1511,22 @@ fn parseAbiString(tree: *const ast.Tree, abi: usize) Self.Error!AbiParts {
 
     // fallback: path is just a library with no symbol
     return AbiParts{ .lib = abi_str, .sym = null };
+}
+
+fn getNode(self: *Self, tree: *const ast.Tree, node_id: usize, span: common.Span) Self.Error!ast.Node {
+    const node_value = tree.getNode(node_id) orelse return self.reportError(
+        "I001",
+        "Node with ID {} does not exist.",
+        .{node_id},
+        error.InvalidNodeId,
+        .{
+            .labels = &.{.{
+                .color = .{ .basic = .red },
+                .span = span.asReportz(),
+                .message = "Node ID out of bounds.",
+            }},
+        },
+    );
+
+    return node_value;
 }
