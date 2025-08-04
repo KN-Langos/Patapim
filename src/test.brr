@@ -88,3 +88,7 @@ brr ups = upo.num1; //1
 upo.num1 = 10;
 
 brr ppas = upo.sum(); //15
+
+for(ii in 0..10) {
+    ccc += ii;
+}

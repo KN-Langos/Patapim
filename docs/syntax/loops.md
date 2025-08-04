@@ -56,7 +56,7 @@ for (element in collection) {
 
 **Key Features:**
 
-- Iterates over arrays, strings, and other iterables
+- Iterates over arrays, strings, and (in the future) other iterables
 - Provides direct element access (not index)
 - Clean syntax for collection processing
 
@@ -77,14 +77,14 @@ for (i in start..end) {
 
 **Key Features:**
 
-- Exclusive range (includes only start)
+- Half-Inclusive range (includes only start)
 - Step size is always +1
 - Similar to traditional for loops in other languages
 
 **Example:**
 ```
 for (i in 0..4) {
-    print(i * 2);  // 0, 2, 4, 6, 8
+    print(i * 2);  // 0, 2, 4, 6
 }
 ```
 
