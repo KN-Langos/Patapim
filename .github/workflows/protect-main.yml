@@ -1,0 +1,19 @@
+# .github/workflows/protect-main.yml
+name: Enforce Development to Main Merge Policy
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch
+        run: |
+          echo "Source branch is: ${{ github.head_ref }}"
+          if [ "${{ github.head_ref }}" != "development" ]; then
+            echo "::error::Only pull requests from 'development' to 'main' are allowed."
+            exit 1
+          fi

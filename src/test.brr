@@ -1,0 +1,94 @@
+
+brr abc = 2+2;
+brr def = 2*2;
+brr ghi = def - abc;
+
+ghi = ghi + (1 * 0.5);
+
+if(abc < def) {
+    brr x = 1;
+    abc = x;
+} else if(2 > 3) {
+    brr x = 2;
+    abc = x;
+} else {
+    brr x = 3;
+    abc = x;
+}
+
+brr xyz = if(abc == 3) 10 else 20;
+const pol = abc + def + ghi + xyz;
+brr i = 0;
+
+while(i < 10){
+  i = i + 1;
+}
+
+brr j = 2;
+brr even = 0;
+
+loop
+{
+  loop
+  {
+      j = j + 1;
+      if(j >= 10)
+      {
+          break;
+      }
+  }
+
+  even = even + 1;
+
+  if(even == 15)
+  {
+      break;
+  }
+}
+
+def += abc;
+
+//array test
+brr arr = [1,2,3,4];
+brr array2 = [1, 2.5, "ziemniak"];
+brr cba  = array2[1];
+brr aaa = array2[2];
+array2[0] = 2;
+brr length = array2.len;
+aaa = array2[arr[1]];
+brr bbb = array2[array2[0]];
+brr array2D = [[1,2], [3,4,5],[6,7,8]];
+brr ccc = array2D[0][0];
+
+array2D[0].push(9);
+array2D.push([10]);
+
+fn add(x, y) {
+    return x + y;
+}
+
+brr result = add(2, def-1);
+
+brr myTuple = (2+j, 3, "tuple", 4.5);
+
+ccc = myTuple.2;
+
+struct MyStruct {
+    num1, num2, num3,
+
+    fn sum() {
+        return this.num1 + this.num2 + this.num3;
+    }
+}
+
+brr upo = MyStruct { num1: 1, num2: 2, num3: 3 };
+
+brr ups = upo.num1; //1
+
+upo.num1 = 10;
+
+brr ppas = upo.sum(); //15
+
+for(ii in 0..10) {
+    ccc += ii;
+}
