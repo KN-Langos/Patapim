@@ -369,6 +369,7 @@ pub fn evalNode(self: *Self, tree: *const ast.Tree, node_id: usize, env: *runtim
         .conditional => return try self.evalConditional(tree, node, env),
         .loop => return try self.evalLoop(tree, node, env),
         .while_loop => return try self.evalWhile(tree, node, env),
+        .do_while_loop => return try self.evalDoWhile(tree, node, env),
         .for_loop => return try self.evalForLoop(tree, node, env),
         .break_stmt => {
             flow_control = .BREAK;
@@ -1187,6 +1188,34 @@ pub fn evalWhile(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runti
         return_value = try self.evalNode(tree, while_loop.body, env);
 
         condition_value = try self.evalNode(tree, while_loop.condition, env);
+        condition_bool = isTruthy(condition_value);
+    }
+
+    return return_value;
+}
+
+pub fn evalDoWhile(self: *Self, tree: *const ast.Tree, node: ast.Node, env: *runtime.Environment) Self.Error!runtime.RuntimeValue {
+    const do_while_loop = node.kind.do_while_loop;
+    var return_value: runtime.RuntimeValue = runtime.RuntimeValue.Void;
+
+    // Execute body at least once
+    return_value = try self.evalNode(tree, do_while_loop.body, env);
+
+    if (checkBreak()) {
+        return return_value;
+    }
+
+    // Then check condition and continue if true
+    var condition_value = try self.evalNode(tree, do_while_loop.condition, env);
+    var condition_bool = isTruthy(condition_value);
+
+    while (condition_bool) {
+        if (checkBreak())
+            break;
+
+        return_value = try self.evalNode(tree, do_while_loop.body, env);
+
+        condition_value = try self.evalNode(tree, do_while_loop.condition, env);
         condition_bool = isTruthy(condition_value);
     }
 

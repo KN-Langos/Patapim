@@ -228,6 +228,7 @@ pub fn parseAnyStatement(self: *Self) Self.Error!usize {
     if (try self.parseMaybeConstantDeclaration()) |stmt| return stmt;
     if (try self.parseMaybeLoop()) |stmt| return stmt;
     if (try self.parseMaybeWhileLoop()) |stmt| return stmt;
+    if (try self.parseMaybeDoWhileLoop()) |stmt| return stmt;
     if (try self.parseMaybeForLoop()) |stmt| return stmt;
     if (try self.parseMaybeConditionalStatement()) |stmt| return stmt;
     if (try self.parseMaybeStructDeclStatement()) |stmt| return stmt;
@@ -602,6 +603,29 @@ pub fn parseMaybeWhileLoop(self: *Self) !?usize {
         .kind = .{ .while_loop = .{
             .condition = condition,
             .body = body,
+        } },
+    });
+}
+
+// Parse maybe do-while loop statement and return its ID if parsed.
+pub fn parseMaybeDoWhileLoop(self: *Self) !?usize {
+    if (try self.maybe(.KW_DO) == null) return null; // This may not be a do-while loop statement.
+    try self.pushSpan();
+    defer _ = self.popSpan();
+
+    const body = try self.parseCodeBlock();
+
+    _ = try self.expect(.KW_WHILE);
+    _ = try self.expect(.LEFT_PAREN);
+    const condition = try self.parseExpression();
+    _ = try self.expect(.RIGHT_PAREN);
+    _ = try self.expect(.SEMICOLON);
+
+    return try self.tree.addNode(.{
+        .span = self.peekSpan(),
+        .kind = .{ .do_while_loop = .{
+            .body = body,
+            .condition = condition,
         } },
     });
 }

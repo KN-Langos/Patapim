@@ -48,6 +48,7 @@ pub const NodeKind = union(enum) {
     constant: Const,
     loop: Loop,
     while_loop: WhileLoop,
+    do_while_loop: DoWhileLoop,
     for_loop: ForLoop,
     struct_decl: StructDecl,
     enum_decl: EnumDecl,
@@ -186,6 +187,13 @@ pub const Loop = struct {
 pub const WhileLoop = struct {
     condition: NodeId,
     body: NodeId,
+};
+
+// Do-while loop node. This is equivalent to the following code:
+// `do { ... } while (condition);`
+pub const DoWhileLoop = struct {
+    body: NodeId,
+    condition: NodeId,
 };
 
 // For loop node. This is equivalent to the following code:

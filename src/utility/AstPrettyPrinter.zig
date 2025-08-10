@@ -452,6 +452,29 @@ pub fn visitWhileLoop(self: *Self, tree: *const ast.Tree, span: common.Span, loo
     try self.writer.writeAll("}\n");
 }
 
+pub fn visitDoWhileLoop(self: *Self, tree: *const ast.Tree, span: common.Span, loop: ast.DoWhileLoop, visitee: anytype) !void {
+    _ = visitee;
+
+    try self.writeIndent();
+    try self.writer.print("{}do{}", .{
+        ansi.Style{ .foreground = .{ .basic = .yellow } },
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
+    try self.writeSpan(span);
+
+    try self.writer.writeAll(" {\n");
+    self.indent += 4;
+    try self.accept(tree, loop.body);
+    self.indent -= 4;
+    try self.writeIndent();
+    try self.writer.print("}} {}while{}(", .{
+        ansi.Style{ .foreground = .{ .basic = .yellow } },
+        ansi.Style{ .modifiers = .{ .reset = true } },
+    });
+    try self.accept(tree, loop.condition);
+    try self.writer.writeAll(");\n");
+}
+
 pub fn visitForLoop(self: *Self, tree: *const ast.Tree, span: common.Span, loop: ast.ForLoop, visitee: anytype) !void {
     _ = visitee;
 
